@@ -59,24 +59,25 @@ def fill_servicenow_ticket(driver, wait, data):
         print(f"🚀 เริ่มสร้าง Ticket: {data.get('short_description', 'No Subject')}")
         driver.get("https://keris.service-now.com/incident.do?sys_id=-1")
         
-        # รอให้หน้าโหลดพื้นฐานเสร็จก่อนนิดนึง
-        time.sleep(5) 
+        # รอให้หน้าเว็บโหลดจนช่อง Short Description ปรากฏ (เพื่อความชัวร์ว่าฟอร์มมาแล้ว)
+        wait.until(EC.presence_of_element_located((By.ID, "incident.short_description")))
 
-        # --- จุดที่ 1: เลือก Sense & Respond Demand (ท่าสั้น บรรทัดเดียวจบ!) ---
-        Select(driver.find_element(By.ID, "incident.u_sense_respond_demand")).select_by_visible_text("Retail Solution & Delivery")
+        # --- จุดที่ 1: เลือก Demand (ท่าสั้นแบบ Urgency) ---
+        print("- กำลังเลือก Sense & Respond Demand...")
+        # ลองใช้ ID สั้น (u_...) เพราะแบบยาว (incident.u_...) ใน log แจ้งว่าหาไม่เจอ
+        Select(driver.find_element(By.ID, "u_sense_respond_demand")).select_by_visible_text("Retail Solution & Delivery")
 
         # พิมพ์ Caller
-        caller_field = wait.until(EC.element_to_be_clickable((By.ID, "sys_display.incident.caller_id")))
+        caller_field = driver.find_element(By.ID, "sys_display.incident.caller_id")
         caller_field.clear()
-        caller_field.send_keys(data.get("caller", ""))
+        caller_field.send_keys(data.get("caller", ""), Keys.RETURN)
         time.sleep(2)
-        caller_field.send_keys(Keys.RETURN)
         
         # กรอกฟิลด์ข้อความ
         driver.find_element(By.ID, "incident.short_description").send_keys(data.get("short_description", ""))
         driver.find_element(By.ID, "incident.description").send_keys(data.get("description", ""))
         
-        # เลือก Category, Impact, Urgency (ท่ามาตรฐานที่สั้นและได้ผล)
+        # เลือก Category, Impact, Urgency (ท่ามาตรฐานที่คุณคอนเฟิร์มว่า work)
         Select(driver.find_element(By.ID, "incident.category")).select_by_visible_text(data.get("category", "Software"))
         Select(driver.find_element(By.ID, "incident.impact")).select_by_visible_text(data.get("impact", "5 - Minor"))
         Select(driver.find_element(By.ID, "incident.urgency")).select_by_visible_text(data.get("urgency", "5 - Minor"))
@@ -84,16 +85,12 @@ def fill_servicenow_ticket(driver, wait, data):
         # Assignment Group
         ag_field = driver.find_element(By.ID, "sys_display.incident.assignment_group")
         ag_field.clear()
-        ag_field.send_keys("FTH ISS3000 MALL")
+        ag_field.send_keys("FTH ISS3000 MALL", Keys.RETURN)
         time.sleep(2)
-        ag_field.send_keys(Keys.RETURN)
 
-        # Reported By (Reference Field)
-        rep_field = wait.until(EC.element_to_be_clickable((By.ID, "sys_display.incident.u_reported_by")))
-        rep_field.clear()
-        rep_field.send_keys(data.get("reported_by", "DON-001"))
+        # Reported By (สั้นแบบที่คุณชอบ)
+        driver.find_element(By.ID, "sys_display.incident.u_reported_by").send_keys(data.get("reported_by", "DON-001"), Keys.RETURN)
         time.sleep(2)
-        rep_field.send_keys(Keys.RETURN)
 
         # Mitigate SLA (contact_info)
         driver.find_element(By.ID, "incident.u_mitigate_sla_description").send_keys(data.get("contact_info", ""))

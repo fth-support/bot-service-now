@@ -55,35 +55,52 @@ def fill_servicenow_ticket(data):
         wait = WebDriverWait(driver, 15)
 
         print("กำลังค้นหาและคลิกปุ่ม New...")
+        # 1. สำคัญมาก: รีเซ็ตให้ออกมาอยู่หน้าจอหลักเสมอ ป้องกันบอทหลงทางใน iframe
+        driver.switch_to.default_content() 
+        
+        # 2. เข้าไปใน iframe
         wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
-        new_button = wait.until(EC.element_to_be_clickable((By.ID, "sysverb_new")))
-        new_button.click()
+        
+        # 3. ใช้วิธี 'JavaScript Click' แทนการคลิกเมาส์ปกติ เพื่อแก้ Error หน้าจอ
+        new_button = wait.until(EC.presence_of_element_located((By.ID, "sysverb_new")))
+        driver.execute_script("arguments[0].click();", new_button)
 
         print("รอโหลดหน้าฟอร์มกรอกรายละเอียด...")
+        # 4. ออกมาหน้าหลัก แล้วรอให้ iframe โหลดหน้าฟอร์มใหม่
         driver.switch_to.default_content()
-        time.sleep(2) 
+        time.sleep(3) # เพิ่มเวลาหน่วงนิดนึงให้เว็บกระพริบโหลดหน้าเสร็จ
         wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
 
         print("กำลังกรอกข้อมูล...")
         
-        # ตัวอย่างการกรอกข้อมูล 1 ช่องเพื่อความรวดเร็วในการแสดงตัวอย่าง
+        # --- (เริ่มกรอกข้อมูลตามปกติ) ---
         caller_field = wait.until(EC.element_to_be_clickable((By.ID, "sys_display.incident.caller_id")))
         caller_field.clear()
         caller_field.send_keys(data["caller"])
         time.sleep(1.5)
         caller_field.send_keys(Keys.RETURN)
         
-        # ... (โค้ดกรอกข้อมูลฟิลด์อื่นๆ ใส่ไว้ตรงนี้เหมือนเดิมครับ) ...
+        Select(driver.find_element(By.ID, "incident.category")).select_by_visible_text(data["category"])
+        Select(driver.find_element(By.ID, "incident.impact")).select_by_visible_text(data["impact"])
+        Select(driver.find_element(By.ID, "incident.urgency")).select_by_visible_text(data["urgency"])
+        driver.find_element(By.ID, "incident.short_description").send_keys(data["short_desc"])
+        driver.find_element(By.ID, "incident.description").send_keys(data["desc"])
+        Select(driver.find_element(By.ID, "incident.contact_type")).select_by_visible_text(data["channel"])
+        Select(driver.find_element(By.ID, "incident.state")).select_by_visible_text(data["state"])
+        
+        ag_field = driver.find_element(By.ID, "sys_display.incident.assignment_group")
+        ag_field.clear()
+        ag_field.send_keys(data["assignment_group"])
+        time.sleep(1.5)
+        ag_field.send_keys(Keys.RETURN)
 
         print("🎉 บอททำงานบน ServiceNow เสร็จสิ้น!")
         driver.switch_to.default_content()
         
-        # สำคัญมาก: ต้องส่งค่า True กลับไปเพื่อบอกว่ากรอกสำเร็จและไม่พังกลางทาง
         return True 
 
     except Exception as e:
         print(f"❌ เกิดข้อผิดพลาดบนหน้าเว็บ: {e}")
-        # ถ้ามี Error จะส่งค่า False กลับไป เพื่อไม่ให้อัปเดต Firebase มั่วๆ
         return False
 
 # ==========================================

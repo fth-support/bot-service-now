@@ -35,11 +35,11 @@ def get_and_lock_ticket(db):
             doc_id = doc.id
             doc_data = doc.to_dict()
             db.collection("incidents").document(doc_id).update({"is_pulled": True})
-            print(f"\n🔒 ล็อกงาน {doc_id} (Pending -> In-Progress)")
+            print(f"\n🔒 ล็อกงาน {doc_id} เรียบร้อย...")
             return doc_id, doc_data
         return None, None
     except Exception as e:
-        print(f"❌ Error Firestore Read: {e}")
+        print(f"❌ Error Firestore: {e}")
         return None, None
 
 def mark_as_completed(db, doc_id):
@@ -50,40 +50,36 @@ def mark_as_completed(db, doc_id):
         print(f"❌ Error Firestore Update: {e}")
 
 # ==========================================
-# ส่วนที่ 2: ควบคุม ServiceNow (สั้นและชัวร์)
+# ส่วนที่ 2: ควบคุม ServiceNow (สั้น ชับ ตาม ID จริง)
 # ==========================================
 def fill_servicenow_ticket(driver, wait, data):
     try:
         print(f"🚀 เริ่มสร้าง Ticket: {data.get('short_description', 'No Subject')}")
         driver.get("https://keris.service-now.com/incident.do?sys_id=-1")
         
-        # ⏳ รอหน้าฟอร์มกางตัวออกให้สุด
-        time.sleep(6) 
+        # ⏳ รอหน้าฟอร์มโหลด (ให้ช่อง Short Description ขึ้นมาเป็นสัญญาณ)
+        wait.until(EC.presence_of_element_located((By.ID, "incident.short_description")))
 
-        # --- 1. เลือก Demand (ใช้ท่าเดียวกับ Urgency แต่เพิ่ม CSS Selector แบบค้นหา ID) ---
+        # --- 1. เลือก Demand (ใช้ ID จริงที่เพิ่งเจอ: incident.u_demand) ---
         print("- กำลังเลือก Sense & Respond Demand...")
-        # ท่านี้จะหา Tag <select> ที่ ID มีคำว่า 'sense_respond' อยู่ข้างใน (ชัวร์สุดๆ)
-        demand_field = driver.find_element(By.CSS_SELECTOR, "select[id*='sense_respond']")
-        Select(demand_field).select_by_visible_text("Retail Solution & Delivery")
+        Select(driver.find_element(By.ID, "incident.u_demand")).select_by_visible_text("Retail Solution & Delivery")
 
-        # --- 2. กรอก Caller (ใช้ ID ตาม HTML ที่คุณส่งมา) ---
+        # --- 2. กรอก Caller (ใช้ sys_display) ---
         print("- กำลังกรอก Caller...")
-        caller = driver.find_element(By.ID, "sys_display.incident.caller_id")
-        caller.clear()
-        caller.send_keys(data.get("caller", ""), Keys.RETURN)
+        caller_field = driver.find_element(By.ID, "sys_display.incident.caller_id")
+        caller_field.clear()
+        caller_field.send_keys(data.get("caller", ""), Keys.RETURN)
         time.sleep(2)
         
-        # --- 3. ฟิลด์มาตรฐาน (สั้นๆ แบบที่ต้องการ) ---
+        # --- 3. ฟิลด์มาตรฐาน (สั้นๆ แบบ Urgency) ---
         driver.find_element(By.ID, "incident.short_description").send_keys(data.get("short_description", ""))
         driver.find_element(By.ID, "incident.description").send_keys(data.get("description", ""))
         
-        # ท่ามาตรฐานที่ Urgency ใช้แล้วผ่าน
         Select(driver.find_element(By.ID, "incident.category")).select_by_visible_text(data.get("category", "Software"))
         Select(driver.find_element(By.ID, "incident.impact")).select_by_visible_text(data.get("impact", "5 - Minor"))
         Select(driver.find_element(By.ID, "incident.urgency")).select_by_visible_text(data.get("urgency", "5 - Minor"))
         
         # --- 4. Assignment Group & Reported By ---
-        print("- กำลังกรอก Assignment Group & Reported By...")
         driver.find_element(By.ID, "sys_display.incident.assignment_group").send_keys("FTH ISS3000 MALL", Keys.RETURN)
         time.sleep(2)
 
@@ -115,7 +111,7 @@ if __name__ == "__main__":
         try:
             driver = webdriver.Chrome(options=chrome_options)
             wait = WebDriverWait(driver, 15)
-            print("🤖 บอทพร้อมทำงาน! (เฝ้า Firestore incidents/Pending)...")
+            print("🤖 บอทพร้อมทำงาน! กำลังเฝ้า Firestore...")
 
             while True:
                 doc_id, doc_data = get_and_lock_ticket(db)
@@ -123,7 +119,7 @@ if __name__ == "__main__":
                     if fill_servicenow_ticket(driver, wait, doc_data):
                         mark_as_completed(db, doc_id)
                     else:
-                        print(f"⚠️ งาน {doc_id} พลาดบนหน้าเว็บ (ตรวจสอบ is_pulled=true ใน Firestore)")
+                        print(f"⚠️ งาน {doc_id} มีปัญหา (ตรวจสอบ is_pulled ใน Firestore)")
                 else:
                     print(".", end="", flush=True)
                 time.sleep(15)

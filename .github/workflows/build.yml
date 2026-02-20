@@ -1,0 +1,35 @@
+name: Build ServiceNow Bot EXE
+
+on:
+  push:
+    paths:
+      - 'README.md'       # ทำงานเมื่อไฟล์ README.md มีการอัปเดต
+      - 'bot_script.py'   # ทำงานเมื่อไฟล์โค้ดมีการอัปเดต
+
+jobs:
+  build-windows:
+    runs-on: windows-latest 
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install selenium pyinstaller
+
+    - name: Build EXE with PyInstaller
+      run: |
+        pyinstaller --onefile bot_script.py
+
+    - name: Upload EXE as Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: ServiceNow-Bot-App
+        path: dist/bot_script.exe

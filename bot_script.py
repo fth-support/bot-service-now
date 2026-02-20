@@ -59,43 +59,41 @@ def fill_servicenow_ticket(driver, wait, data):
         print(f"🚀 เริ่มสร้าง Ticket: {data.get('short_description', 'No Subject')}")
         driver.get("https://keris.service-now.com/incident.do?sys_id=-1")
         
-        # รอให้หน้าเว็บโหลดจนช่อง Short Description ปรากฏ (เพื่อความชัวร์ว่าฟอร์มมาแล้ว)
-        wait.until(EC.presence_of_element_located((By.ID, "incident.short_description")))
+        # ⏳ รอให้ฟอร์มพื้นฐานโหลดเสร็จ (สำคัญมากสำหรับ Dropdown)
+        time.sleep(5) 
 
-        # --- จุดที่ 1: เลือก Demand (ท่าสั้นแบบ Urgency) ---
+        # --- จุดที่ 1: เลือก Sense & Respond Demand (ท่าเดียวกับ Urgency) ---
         print("- กำลังเลือก Sense & Respond Demand...")
-        # ลองใช้ ID สั้น (u_...) เพราะแบบยาว (incident.u_...) ใน log แจ้งว่าหาไม่เจอ
-        Select(driver.find_element(By.ID, "u_sense_respond_demand")).select_by_visible_text("Retail Solution & Delivery")
+        # ผมทำเผื่อไว้ 2 ID (มาตรฐาน vs แฝง) เพื่อไม่ให้บอทแครชถ้าหาตัวแรกไม่เจอ
+        try:
+            Select(driver.find_element(By.ID, "incident.u_sense_respond_demand")).select_by_visible_text("Retail Solution & Delivery")
+        except:
+            Select(driver.find_element(By.ID, "u_sense_respond_demand")).select_by_visible_text("Retail Solution & Delivery")
 
-        # พิมพ์ Caller
-        caller_field = driver.find_element(By.ID, "sys_display.incident.caller_id")
-        caller_field.clear()
-        caller_field.send_keys(data.get("caller", ""), Keys.RETURN)
+        # --- จุดที่ 2: กรอก Caller (ใช้ ID ที่คุณส่ง HTML มาให้) ---
+        print("- กำลังกรอก Caller...")
+        driver.find_element(By.ID, "sys_display.incident.caller_id").send_keys(data.get("caller", ""), Keys.RETURN)
         time.sleep(2)
         
-        # กรอกฟิลด์ข้อความ
+        # --- จุดที่ 3: ฟิลด์มาตรฐาน (สั้นๆ แบบที่คุณชอบ) ---
         driver.find_element(By.ID, "incident.short_description").send_keys(data.get("short_description", ""))
         driver.find_element(By.ID, "incident.description").send_keys(data.get("description", ""))
         
-        # เลือก Category, Impact, Urgency (ท่ามาตรฐานที่คุณคอนเฟิร์มว่า work)
         Select(driver.find_element(By.ID, "incident.category")).select_by_visible_text(data.get("category", "Software"))
         Select(driver.find_element(By.ID, "incident.impact")).select_by_visible_text(data.get("impact", "5 - Minor"))
         Select(driver.find_element(By.ID, "incident.urgency")).select_by_visible_text(data.get("urgency", "5 - Minor"))
         
-        # Assignment Group
-        ag_field = driver.find_element(By.ID, "sys_display.incident.assignment_group")
-        ag_field.clear()
-        ag_field.send_keys("FTH ISS3000 MALL", Keys.RETURN)
+        # --- จุดที่ 4: Assignment Group & Reported By ---
+        driver.find_element(By.ID, "sys_display.incident.assignment_group").send_keys("FTH ISS3000 MALL", Keys.RETURN)
         time.sleep(2)
 
-        # Reported By (สั้นแบบที่คุณชอบ)
         driver.find_element(By.ID, "sys_display.incident.u_reported_by").send_keys(data.get("reported_by", "DON-001"), Keys.RETURN)
         time.sleep(2)
 
-        # Mitigate SLA (contact_info)
+        # Mitigate SLA
         driver.find_element(By.ID, "incident.u_mitigate_sla_description").send_keys(data.get("contact_info", ""))
 
-        # กด Save
+        # --- จุดที่ 5: บันทึก ---
         print("💾 กำลังกดบันทึก...")
         driver.find_element(By.ID, "sysverb_insert").click()
         
@@ -105,7 +103,6 @@ def fill_servicenow_ticket(driver, wait, data):
     except Exception as e:
         print(f"❌ Error ServiceNow: {e}")
         return False
-
 # ==========================================
 # Main Loop
 # ==========================================

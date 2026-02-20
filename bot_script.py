@@ -55,23 +55,21 @@ def fill_servicenow_ticket(data):
         wait = WebDriverWait(driver, 15)
 
         # ---------------------------------------------------------
-        # 🚀 ท่าไม้ตาย: ยิงตรงไปหน้า New Record ทันที (ไม่ต้องคลิกปุ่ม New)
+        # 🚀 ท่าไม้ตายขั้นสุดยอด: ยิงเข้าหน้า Raw Form โดยตรง (ไม่มี iframe)
         # ---------------------------------------------------------
-        print("กำลังพาไปหน้าสร้าง Ticket ใหม่โดยตรง...")
-        driver.switch_to.default_content()
-        # ใช้ URL ของหน้า New Incident บนระบบของคุณ
-        new_record_url = "https://keris.service-now.com/now/nav/ui/classic/params/target/incident.do%3Fsys_id%3D-1"
-        driver.get(new_record_url)
+        print("กำลังพาไปหน้า Raw Form (ลดการประมวลผล iframe)...")
+        # สังเกตว่า URL จะสั้นลง เป็นการเรียกฟอร์มแบบตรงๆ
+        raw_form_url = "https://keris.service-now.com/incident.do?sys_id=-1"
+        driver.get(raw_form_url)
 
         print("รอโหลดหน้าฟอร์มกรอกรายละเอียด...")
-        time.sleep(4) # หน่วงเวลาให้โครงสร้างเว็บใหม่โหลดเสร็จ (สำคัญมาก)
+        time.sleep(3) # หน่วงเวลาให้เว็บโหลดเสร็จ
         
-        # มุดเข้าไปใน iframe ของฟอร์ม
-        wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
-
-        print("กำลังกรอกข้อมูล...")
+        # ❌ เราไม่ต้องใช้คำสั่ง switch_to.frame อีกต่อไปแล้ว เพราะหน้านี้ไม่มีกรอบ!
         
-        # --- (เริ่มกรอกข้อมูลตามปกติ) ---
+        print("กำลังเริ่มกรอกข้อมูล...")
+        
+        # --- (เริ่มกรอกข้อมูลทันที) ---
         caller_field = wait.until(EC.element_to_be_clickable((By.ID, "sys_display.incident.caller_id")))
         caller_field.clear()
         caller_field.send_keys(data["caller"])
@@ -92,8 +90,8 @@ def fill_servicenow_ticket(data):
         time.sleep(1.5)
         ag_field.send_keys(Keys.RETURN)
 
-        print("🎉 บอททำงานบน ServiceNow เสร็จสิ้น!")
-        driver.switch_to.default_content()
+        print("🎉 บอทกรอกข้อมูลบน ServiceNow เสร็จสิ้น!")
+        # ❌ ไม่ต้อง switch_to.default_content() แล้วเช่นกัน
         
         return True 
 

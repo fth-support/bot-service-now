@@ -54,21 +54,19 @@ def fill_servicenow_ticket(data):
         driver = webdriver.Chrome(options=chrome_options)
         wait = WebDriverWait(driver, 15)
 
-        print("กำลังค้นหาและคลิกปุ่ม New...")
-        # 1. สำคัญมาก: รีเซ็ตให้ออกมาอยู่หน้าจอหลักเสมอ ป้องกันบอทหลงทางใน iframe
-        driver.switch_to.default_content() 
-        
-        # 2. เข้าไปใน iframe
-        wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
-        
-        # 3. ใช้วิธี 'JavaScript Click' แทนการคลิกเมาส์ปกติ เพื่อแก้ Error หน้าจอ
-        new_button = wait.until(EC.presence_of_element_located((By.ID, "sysverb_new")))
-        driver.execute_script("arguments[0].click();", new_button)
+        # ---------------------------------------------------------
+        # 🚀 ท่าไม้ตาย: ยิงตรงไปหน้า New Record ทันที (ไม่ต้องคลิกปุ่ม New)
+        # ---------------------------------------------------------
+        print("กำลังพาไปหน้าสร้าง Ticket ใหม่โดยตรง...")
+        driver.switch_to.default_content()
+        # ใช้ URL ของหน้า New Incident บนระบบของคุณ
+        new_record_url = "https://keris.service-now.com/now/nav/ui/classic/params/target/incident.do%3Fsys_id%3D-1"
+        driver.get(new_record_url)
 
         print("รอโหลดหน้าฟอร์มกรอกรายละเอียด...")
-        # 4. ออกมาหน้าหลัก แล้วรอให้ iframe โหลดหน้าฟอร์มใหม่
-        driver.switch_to.default_content()
-        time.sleep(3) # เพิ่มเวลาหน่วงนิดนึงให้เว็บกระพริบโหลดหน้าเสร็จ
+        time.sleep(4) # หน่วงเวลาให้โครงสร้างเว็บใหม่โหลดเสร็จ (สำคัญมาก)
+        
+        # มุดเข้าไปใน iframe ของฟอร์ม
         wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
 
         print("กำลังกรอกข้อมูล...")

@@ -59,19 +59,11 @@ def fill_servicenow_ticket(driver, wait, data):
         print(f"🚀 เริ่มสร้าง Ticket: {data.get('short_description', 'No Subject')}")
         driver.get("https://keris.service-now.com/incident.do?sys_id=-1")
         
-        # รอให้ฟิลด์แรกปรากฏขึ้นมาเพื่อยืนยันว่าหน้าโหลดเสร็จ
-        wait.until(EC.presence_of_element_located((By.ID, "incident.short_description")))
+        # รอให้หน้าโหลดพื้นฐานเสร็จก่อนนิดนึง
+        time.sleep(5) 
 
-        # --- แก้ไขจุดที่ 1: ใช้ท่า Select ปกติ (เหมือน Impact/Urgency) ---
-        print("- กำลังเลือก Sense & Respond Demand...")
-        try:
-            # ใช้ WebDriverWait รอให้ Element พร้อมที่จะเลือก
-            demand_element = wait.until(EC.element_to_be_clickable((By.ID, "incident.u_sense_respond_demand")))
-            dropdown = Select(demand_element)
-            dropdown.select_by_visible_text("Retail Solution & Delivery")
-            print("  ✅ เลือก Demand สำเร็จ")
-        except Exception as ex:
-            print(f"  ⚠️ ไม่สามารถเลือก Demand ได้ (อาจจะ ID ไม่ตรงหรือตัวเลือกไม่มี): {ex}")
+        # --- จุดที่ 1: เลือก Sense & Respond Demand (ท่าสั้น บรรทัดเดียวจบ!) ---
+        Select(driver.find_element(By.ID, "incident.u_sense_respond_demand")).select_by_visible_text("Retail Solution & Delivery")
 
         # พิมพ์ Caller
         caller_field = wait.until(EC.element_to_be_clickable((By.ID, "sys_display.incident.caller_id")))
@@ -84,14 +76,10 @@ def fill_servicenow_ticket(driver, wait, data):
         driver.find_element(By.ID, "incident.short_description").send_keys(data.get("short_description", ""))
         driver.find_element(By.ID, "incident.description").send_keys(data.get("description", ""))
         
-        # เลือก Category, Impact, Urgency (ใช้ท่ามาตรฐานที่ได้ผลเสมอ)
-        try:
-            Select(driver.find_element(By.ID, "incident.category")).select_by_visible_text(data.get("category", "Software"))
-            Select(driver.find_element(By.ID, "incident.impact")).select_by_visible_text(data.get("impact", "5 - Minor"))
-            Select(driver.find_element(By.ID, "incident.urgency")).select_by_visible_text(data.get("urgency", "5 - Minor"))
-            print("  ✅ เลือก Category/Impact/Urgency สำเร็จ")
-        except Exception as e:
-            print(f"  ⚠️ Error ในการเลือก Dropdown มาตรฐาน: {e}")
+        # เลือก Category, Impact, Urgency (ท่ามาตรฐานที่สั้นและได้ผล)
+        Select(driver.find_element(By.ID, "incident.category")).select_by_visible_text(data.get("category", "Software"))
+        Select(driver.find_element(By.ID, "incident.impact")).select_by_visible_text(data.get("impact", "5 - Minor"))
+        Select(driver.find_element(By.ID, "incident.urgency")).select_by_visible_text(data.get("urgency", "5 - Minor"))
         
         # Assignment Group
         ag_field = driver.find_element(By.ID, "sys_display.incident.assignment_group")
@@ -100,17 +88,12 @@ def fill_servicenow_ticket(driver, wait, data):
         time.sleep(2)
         ag_field.send_keys(Keys.RETURN)
 
-        # --- จุดที่ 2: Reported By (Reference Field ที่แก้แล้วได้ผล) ---
-        print("- กำลังกรอก Reported By...")
-        try:
-            rep_field = wait.until(EC.element_to_be_clickable((By.ID, "sys_display.incident.u_reported_by")))
-            rep_field.clear()
-            rep_field.send_keys(data.get("reported_by", "DON-001"))
-            time.sleep(2)
-            rep_field.send_keys(Keys.RETURN)
-            print("  ✅ กรอก Reported By สำเร็จ")
-        except Exception as ex:
-            print(f"  ⚠️ ไม่สามารถกรอก Reported By ได้: {ex}")
+        # Reported By (Reference Field)
+        rep_field = wait.until(EC.element_to_be_clickable((By.ID, "sys_display.incident.u_reported_by")))
+        rep_field.clear()
+        rep_field.send_keys(data.get("reported_by", "DON-001"))
+        time.sleep(2)
+        rep_field.send_keys(Keys.RETURN)
 
         # Mitigate SLA (contact_info)
         driver.find_element(By.ID, "incident.u_mitigate_sla_description").send_keys(data.get("contact_info", ""))
@@ -123,7 +106,7 @@ def fill_servicenow_ticket(driver, wait, data):
         return True 
 
     except Exception as e:
-        print(f"❌ Error ServiceNow Main Flow: {e}")
+        print(f"❌ Error ServiceNow: {e}")
         return False
 
 # ==========================================

@@ -23,7 +23,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install selenium pyinstaller
+        pip install selenium pyinstaller pyrebase4
 
     # เพิ่มคำสั่ง --collect-all selenium เพื่อบังคับให้ดึงไฟล์มาให้ครบ
     - name: Build EXE with PyInstaller

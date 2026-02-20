@@ -26,7 +26,7 @@ jobs:
 
     - name: Build EXE with PyInstaller
       run: |
-        # รวบรวม selenium และ firebase_admin เพื่อป้องกัน error โมดูลหาย
+        # รวบรวมทุกอย่างที่จำเป็นสำหรับ Firestore และ Selenium
         pyinstaller --onefile `
         --collect-all selenium `
         --collect-all firebase_admin `

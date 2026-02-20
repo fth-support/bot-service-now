@@ -3,8 +3,9 @@ name: Build ServiceNow Bot EXE
 on:
   push:
     paths:
-      - 'README.md'       # ทำงานเมื่อไฟล์ README.md มีการอัปเดต
-      - 'bot_script.py'   # ทำงานเมื่อไฟล์โค้ดมีการอัปเดต
+      - 'README.md'
+      - 'bot_script.py'
+      - '.github/workflows/build.yml' # เพิ่มบรรทัดนี้ เพื่อให้รันตอนแก้ไฟล์นี้ด้วยเลย
 
 jobs:
   build-windows:
@@ -12,7 +13,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4  # <--- เปลี่ยนเป็น v4 ตรงนี้
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -29,7 +30,7 @@ jobs:
         pyinstaller --onefile bot_script.py
 
     - name: Upload EXE as Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4 # <--- เปลี่ยนเป็น v4 ตรงนี้
       with:
         name: ServiceNow-Bot-App
         path: dist/bot_script.exe

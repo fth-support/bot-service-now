@@ -1,4 +1,5 @@
 import time
+import pyrebase
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -8,57 +9,62 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # ==========================================
-# ส่วนที่ 1: จัดการข้อมูล Firebase
+# ส่วนที่ 1: ตั้งค่า Firebase ของจริง
 # ==========================================
+firebase_config = {
+    "apiKey": "AIzaSyCKhox_fzBzuU9n6Q4hv2fHSiXVUw7_I1U",
+    "authDomain": "service-now-79151.firebaseapp.com",
+    "projectId": "service-now-79151",
+    "databaseURL": "https://service-now-79151-default-rtdb.asia-southeast1.firebasedatabase.app/", # ใส่ URL ที่คุณหามา
+    "storageBucket": "service-now-79151.firebasestorage.app",
+    "messagingSenderId": "437301948553",
+    "appId": "1:437301948553:web:3f383db66adf1fababd658"
+}
+
+firebase = pyrebase.initialize_app(firebase_config)
+db = firebase.database()
+
 def get_new_ticket_from_firebase():
-    """ 
-    จำลองการเช็คงานใหม่ 
-    ในอนาคต: ถ้าไม่มีงานใหม่ ให้ฟังก์ชันนี้ return None, None
-    """
-    # สมมติเงื่อนไข: ถ้าไม่มีข้อมูลใหม่ให้ return (None, None)
-    # แต่ตอนนี้ขอจำลองว่ามีงานมา 1 งานเพื่อการทดสอบ
-    has_new_data = True 
-    
-    if not has_new_data:
+    """ ดึงข้อมูลจริงจาก Firebase เฉพาะตัวที่ status เป็น 'new' """
+    print("\n🔍 กำลังตรวจสอบงานใหม่จาก Firebase...")
+    try:
+        # ดึงข้อมูลจาก node ที่ชื่อ 'tickets' ที่มี status == 'new'
+        all_tickets = db.child("tickets").order_by_child("status").equal_to("new").get()
+        
+        if all_tickets.val():
+            # หยิบงานแรกมาทำ
+            for ticket in all_tickets.each():
+                ticket_id = ticket.key()
+                ticket_data = ticket.val()
+                return ticket_id, ticket_data
+        
+        return None, None
+    except Exception as e:
+        print(f"❌ Error Firebase: {e}")
         return None, None
 
-    ticket_id = "FB_REC_" + str(int(time.time())) # สร้าง ID จำลองตามเวลา
-    mock_data = {
-        "caller": "MALL-0006", 
-        "category": "Software",
-        "impact": "5 - Minor",
-        "urgency": "5 - Minor", 
-        "short_description": "ทดสอบ Loop: ปัญหาระบบ POS", # แก้ไขตามข้อ 1
-        "description": "รายละเอียดจาก Firebase...", # แก้ไขตามข้อ 2
-        "contact_info": "คุณใหญ่ 0926297894", # แก้ไขตามข้อ 3
-        "channel": "Phone",
-        "state": "Acknowledged",
-        "assignment_group": "FTH ISS3000 MALL",
-        "reported_by": "DON-001"
-    }
-    return ticket_id, mock_data
-
 def update_flag_in_firebase(ticket_id):
-    """ ส่ง Flag กลับไปบอก Firebase (ข้อ 4 ส่วนที่ 3) """
-    print(f"✅ [Firebase] อัปเดตสถานะงาน {ticket_id} เป็น 'Completed' เรียบร้อย!")
-    # โค้ดจริง: db.child("tickets").child(ticket_id).update({"status": "completed"})
+    """ เปลี่ยน status เป็น 'completed' เพื่อไม่ให้บอทหยิบมาทำซ้ำ """
+    try:
+        db.child("tickets").child(ticket_id).update({"status": "completed"})
+        print(f"✅ [Firebase] อัปเดตงาน {ticket_id} เป็น 'completed' แล้ว")
+    except Exception as e:
+        print(f"❌ ไม่สามารถอัปเดตสถานะใน Firebase: {e}")
 
 # ==========================================
-# ส่วนที่ 2: ควบคุมหน้าเว็บ ServiceNow
+# ส่วนที่ 2: ควบคุม ServiceNow (เหมือนเดิม)
 # ==========================================
 def fill_servicenow_ticket(driver, wait, data):
     try:
-        print("\n🚀 กำลังเริ่มสร้าง Ticket ใหม่...")
-        raw_form_url = "https://keris.service-now.com/incident.do?sys_id=-1"
-        driver.get(raw_form_url)
+        print(f"🚀 เริ่มสร้าง Ticket: {data.get('short_description', 'No Subject')}")
+        driver.get("https://keris.service-now.com/incident.do?sys_id=-1")
         time.sleep(3) 
 
-        # --- ส่วนที่ 2 ข้อ 4: เลือก Sense & Respond Demand ---
+        # เลือก Sense & Respond Demand
         try:
             demand_select = Select(wait.until(EC.presence_of_element_located((By.ID, "incident.u_sense_respond_demand"))))
             demand_select.select_by_visible_text("Retail Solution & Delivery")
-        except:
-            print("⚠️ ไม่พบฟิลด์ Sense & Respond Demand (ข้ามสเต็ปนี้)")
+        except: pass
 
         # กรอก Caller
         caller_field = wait.until(EC.element_to_be_clickable((By.ID, "sys_display.incident.caller_id")))
@@ -67,15 +73,14 @@ def fill_servicenow_ticket(driver, wait, data):
         time.sleep(1.5)
         caller_field.send_keys(Keys.RETURN)
         
-        # เลือก Category, Impact, Urgency
+        # กรอกรายละเอียดที่ดึงมาจาก Firebase
+        driver.find_element(By.ID, "incident.short_description").send_keys(data["short_description"])
+        driver.find_element(By.ID, "incident.description").send_keys(data["description"])
+        
+        # เลือกค่าอื่นๆ ตาม Fix value
         Select(driver.find_element(By.ID, "incident.category")).select_by_visible_text(data["category"])
         Select(driver.find_element(By.ID, "incident.impact")).select_by_visible_text(data["impact"])
         Select(driver.find_element(By.ID, "incident.urgency")).select_by_visible_text(data["urgency"])
-
-        # --- ข้อ 1 & 2: Mapping ฟิลด์จาก Firebase ---
-        driver.find_element(By.ID, "incident.short_description").send_keys(data["short_description"])
-        driver.find_element(By.ID, "incident.description").send_keys(data["description"])
-
         Select(driver.find_element(By.ID, "incident.contact_type")).select_by_visible_text(data["channel"])
         Select(driver.find_element(By.ID, "incident.state")).select_by_visible_text(data["state"])
         
@@ -86,63 +91,43 @@ def fill_servicenow_ticket(driver, wait, data):
         time.sleep(1.5)
         ag_field.send_keys(Keys.RETURN)
 
-        # Reported By
-        rep_field = driver.find_element(By.ID, "sys_display.incident.u_reported_by")
-        rep_field.clear()
-        rep_field.send_keys(data["reported_by"])
-        time.sleep(1.5)
-        rep_field.send_keys(Keys.RETURN)
-
-        # --- ข้อ 3: Mitigate SLA (ใช้ contact_info) ---
+        # Mitigate SLA Description (ใช้ contact_info จาก Firebase)
         driver.find_element(By.ID, "incident.u_mitigate_sla_description").send_keys(data["contact_info"])
 
-        # --- ส่วนที่ 3 ข้อ 5: กด Save ---
-        print("💾 กำลังกด Save...")
+        # กด Save
         save_button = driver.find_element(By.ID, "sysverb_insert")
         save_button.click()
         
-        time.sleep(3) # รอให้ระบบบันทึกและเปลี่ยนหน้า
-        print("🎉 บันทึก Ticket สำเร็จ!")
+        time.sleep(4) 
         return True 
 
     except Exception as e:
-        print(f"❌ เกิดข้อผิดพลาดระหว่างกรอกข้อมูล: {e}")
+        print(f"❌ Error on ServiceNow: {e}")
         return False
 
 # ==========================================
-# Main: ระบบ Loop ตรวจสอบงาน
+# Main Loop
 # ==========================================
 if __name__ == "__main__":
-    print("🤖 Bot is starting... (Press Ctrl+C to stop)")
-    
-    # ตั้งค่า Chrome ครั้งเดียวที่นอก Loop
     chrome_options = Options()
     chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:9222")
     
     try:
         driver = webdriver.Chrome(options=chrome_options)
         wait = WebDriverWait(driver, 15)
-        
-        # --- เริ่มต้น Loop การทำงาน ---
+        print("🤖 บอทพร้อมทำงานและกำลังเฝ้า Firebase...")
+
         while True:
-            # 1. เช็ค Firebase ว่ามีงานใหม่ไหม
-            ticket_id, ticket_data = get_new_ticket_from_firebase()
+            t_id, t_data = get_new_ticket_from_firebase()
             
-            if ticket_id and ticket_data:
-                # 2. ถ้ามีงาน ให้เริ่มกรอก
-                if fill_servicenow_ticket(driver, wait, ticket_data):
-                    # 3. ถ้ากรอกและ Save สำเร็จ ให้ส่ง Flag กลับ Firebase
-                    update_flag_in_firebase(ticket_id)
-                
-                print("\n✅ งานเสร็จเรียบร้อย กำลังรอตรวจสอบงานใหม่ต่อไป...")
+            if t_id:
+                if fill_servicenow_ticket(driver, wait, t_data):
+                    update_flag_in_firebase(t_id)
             else:
-                # ถ้าไม่มีงานใหม่ ให้พิมพ์จุดบอกสถานะ (เพื่อไม่ให้หน้าจอนิ่งเกินไป)
                 print(".", end="", flush=True)
             
-            # 4. พัก 10 วินาที ก่อนจะวนไปเช็ค Firebase อีกครั้ง (เพื่อไม่ให้ CPU ทำงานหนักเกินไป)
-            time.sleep(10)
+            time.sleep(10) # รอ 10 วินาทีเพื่อเช็คใหม่
 
     except Exception as e:
-        print(f"\n❌ ไม่สามารถเชื่อมต่อกับ Chrome ได้: {e}")
-        print("กรุณาเปิด Chrome ด้วยโหมด Debugging (Port 9222) ก่อนรันบอท")
+        print(f"❌ ไม่สามารถเริ่มบอทได้: {e}")
         input("กด Enter เพื่อปิด...")

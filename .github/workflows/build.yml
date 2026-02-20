@@ -5,7 +5,7 @@ on:
     paths:
       - 'README.md'
       - 'bot_script.py'
-      - '.github/workflows/build.yml' # เพิ่มบรรทัดนี้ เพื่อให้รันตอนแก้ไฟล์นี้ด้วยเลย
+      - '.github/workflows/build.yml'
 
 jobs:
   build-windows:
@@ -13,7 +13,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4  # <--- เปลี่ยนเป็น v4 ตรงนี้
+      uses: actions/checkout@v4
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -25,12 +25,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install selenium pyinstaller
 
+    # เพิ่มคำสั่ง --collect-all selenium เพื่อบังคับให้ดึงไฟล์มาให้ครบ
     - name: Build EXE with PyInstaller
       run: |
-        pyinstaller --onefile bot_script.py
+        pyinstaller --onefile --collect-all selenium bot_script.py
 
     - name: Upload EXE as Artifact
-      uses: actions/upload-artifact@v4 # <--- เปลี่ยนเป็น v4 ตรงนี้
+      uses: actions/upload-artifact@v4
       with:
         name: ServiceNow-Bot-App
         path: dist/bot_script.exe

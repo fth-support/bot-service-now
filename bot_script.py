@@ -10,7 +10,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # ==========================================
-# ส่วนที่ 1: Firestore (Status: on process)
+# ส่วนที่ 1: จัดการ Firestore (System Lock)
 # ==========================================
 def initialize_firestore():
     try:
@@ -51,13 +51,13 @@ def mark_as_completed(db, doc_id):
         print(f"❌ Error Firestore Update: {e}")
 
 # ==========================================
-# ส่วนที่ 2: ควบคุม ServiceNow UAT (บังคับ UI ขยับ)
+# ส่วนที่ 2: ควบคุม ServiceNow UAT
 # ==========================================
 def fill_servicenow_ticket(driver, wait, data):
     try:
         print(f"🚀 เริ่มสร้าง Ticket: {data.get('description', 'No Subject')}")
         
-        # บังคับหน้าจอให้เป็นปัจจุบัน
+        # บังคับหน้าจอให้เป็นปัจจุบันและออกจาก Iframe ทั้งหมด
         driver.switch_to.default_content()
         uat_form_url = "https://keristest.service-now.com/incident.do?sys_id=-1"
         driver.get(uat_form_url)
@@ -65,37 +65,53 @@ def fill_servicenow_ticket(driver, wait, data):
         print("⏳ รอหน้าฟอร์มโหลด...")
         time.sleep(6) 
 
-        # 1. กรอก Short Description
+        # 1. Short Description
         print("- กรอก Short Description...")
         short_desc = wait.until(EC.presence_of_element_located((By.ID, "incident.short_description")))
         short_desc.clear()
         short_desc.send_keys(data.get("description", ""))
 
-        # 2. กรอก Caller
+        # 2. Caller
         print("- กรอก Caller...")
         caller_field = driver.find_element(By.ID, "sys_display.incident.caller_id")
         caller_field.clear()
         caller_field.send_keys(data.get("caller", ""), Keys.RETURN)
         time.sleep(2)
 
-        # --- ⚡ จุดที่แก้ไข: External References ⚡ ---
-        print("- กำลังเข้าถึง Tab External References...")
-        try:
-            # คลิกที่ชื่อ Tab เพื่อให้ฟิลด์ปรากฏและ Interact ได้
-            tab_element = driver.find_element(By.XPATH, "//*[contains(text(), 'External References')]")
-            driver.execute_script("arguments[0].click();", tab_element)
-            time.sleep(1)
+        # 3. Assignment Group (จุดที่เพิ่มใหม่!)
+        print("- กรอก Assignment Group (FTH Call Center)...")
+        ag_field = driver.find_element(By.ID, "sys_display.incident.assignment_group")
+        ag_field.clear()
+        ag_field.send_keys("FTH Call Center", Keys.RETURN)
+        time.sleep(2)
 
-            # กรอกข้อมูลลง ID จริงที่ได้จาก HTML: incident.u_extrefno4
-            print("- กำลังกรอก External Ref No 4...")
+        # --- ⚡ ส่วนจัดการ Tab และ External Reference ⚡ ---
+        print("- กำลังสลับไป Tab External References...")
+        try:
+            # ใช้ JavaScript คลิกที่ชื่อ Tab เพื่อความชัวร์
+            tab_script = """
+            var tabs = document.getElementsByClassName('tab_caption_text');
+            for (var i = 0; i < tabs.length; i++) {
+                if (tabs[i].innerText === 'External References') {
+                    tabs[i].click();
+                    return true;
+                }
+            }
+            return false;
+            """
+            driver.execute_script(tab_script)
+            time.sleep(1.5) # รอ Tab กางออก
+
+            # กรอกข้อมูลลง ID จริง: incident.u_extrefno4
+            print("- กรอก External Ref No 4...")
             ext_ref_field = wait.until(EC.element_to_be_clickable((By.ID, "incident.u_extrefno4")))
             ext_ref_field.clear()
             ext_ref_field.send_keys(data.get("ticket_id", ""))
             print("  ✅ กรอก External Ref No 4 สำเร็จ!")
         except Exception as ex:
-            print(f"  ⚠️ ไม่สามารถกรอก External Ref ได้: {ex}")
+            print(f"  ⚠️ มีปัญหาในการกรอก External Ref: {ex}")
 
-        # 4. กด Save
+        # 4. กด Save (Submit)
         print("💾 กำลังกดบันทึก...")
         driver.find_element(By.ID, "sysverb_insert").click()
         
@@ -105,7 +121,7 @@ def fill_servicenow_ticket(driver, wait, data):
     except Exception as e:
         print(f"❌ Error ServiceNow UAT: {e}")
         return False
-        
+
 # ==========================================
 # Main Loop
 # ==========================================
@@ -128,5 +144,5 @@ if __name__ == "__main__":
                     print(".", end="", flush=True)
                 time.sleep(15)
         except Exception as e:
-            print(f"❌ ไม่พบ Chrome โหมด Debug (Port 9222): {e}")
+            print(f"❌ ไม่พบ Chrome โหมด Debug: {e}")
             input("กด Enter เพื่อปิด...")

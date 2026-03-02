@@ -26,7 +26,6 @@ jobs:
 
     - name: Build EXE with PyInstaller
       run: |
-        # รวบรวม module ที่จำเป็นทั้งหมดสำหรับ Firestore และ Selenium เข้าในไฟล์เดียว
         pyinstaller --onefile `
         --collect-all selenium `
         --collect-all firebase_admin `

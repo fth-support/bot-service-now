@@ -37,7 +37,7 @@ def get_and_lock_ticket(db):
             doc_id = doc.id
             doc_data = doc.to_dict()
             db.collection("incidents").document(doc_id).update({"is_pulled": True})
-            print(f"🔒 ล็อกงาน {doc_id} ใน Firebase เรียบร้อย")
+            print(f"🔒 ล็อกงาน {doc_id} เรียบร้อย")
             return doc_id, doc_data
         return None, None
     except Exception as e:
@@ -47,7 +47,7 @@ def get_and_lock_ticket(db):
 def mark_as_completed(db, doc_id):
     try:
         db.collection("incidents").document(doc_id).update({"status": "Completed"})
-        print(f"✅ [Firestore] อัปเดตสถานะงาน {doc_id} เป็น Completed")
+        print(f"✅ [Firestore] ปรับสถานะเป็น Completed")
     except Exception as e:
         print(f"❌ Error Firestore Update: {e}")
 
@@ -58,27 +58,19 @@ def fill_servicenow_ticket(driver, wait, data):
     try:
         print(f"🚀 เริ่มสร้าง Ticket: {data.get('description', 'No Subject')}")
         
-        # --- ⚡ ท่าบังคับ: ดึงหน้าต่างกลับมา Tab ปัจจุบัน ⚡ ---
-        found_tab = False
-        for handle in driver.window_handles:
-            driver.switch_to.window(handle)
-            if "service-now" in driver.current_url.lower():
-                found_tab = True
-                break
-        
-        # พุ่งตรงไปหน้าสร้าง Record ใหม่
+        # บังคับหน้าจอให้เป็นปัจจุบัน
+        driver.switch_to.default_content()
         new_incident_url = "https://keristest.service-now.com/incident.do?sys_id=-1"
         driver.get(new_incident_url)
-        driver.execute_script("window.focus();")
         
         print("⏳ รอหน้าฟอร์มกางตัว...")
-        time.sleep(5) 
+        time.sleep(6) 
 
-        # มุดเข้า iframe 'gsft_main'
-        driver.switch_to.default_content()
+        # ตรวจสอบการมุด iframe 'gsft_main'
         try:
-            wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
-            print("📥 มุดเข้า iframe (gsft_main) สำเร็จ")
+            if not driver.find_elements(By.ID, "incident.short_description"):
+                wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
+                print("📥 มุดเข้า iframe (gsft_main) สำเร็จ")
         except:
             pass
 
@@ -102,25 +94,32 @@ def fill_servicenow_ticket(driver, wait, data):
         ag_field.send_keys("FTH Call Center", Keys.RETURN)
         time.sleep(2)
 
-        # 4. Category, Impact, Urgency (จุดที่เพิ่มใหม่!)
-        print("- เลือก Category, Impact, Urgency เป็น 5 - Minor...")
+        # 4. แก้ไข 3 จุดตาม HTML ที่ให้มา (Category, Impact, Urgency)
+        print("- กำลังตั้งค่า Category, Impact, Urgency...")
         try:
-            # ใช้ท่า Select บรรทัดเดียวแบบที่ Urgency เคยทำได้
-            Select(driver.find_element(By.ID, "incident.category")).select_by_visible_text("5 - Minor")
+            # 4.1 Category: ดึงจาก Firebase (ต้องพิมพ์ให้ตรงกับตัวเลือกใน HTML เช่น Software, Hardware)
+            cat_value = data.get("category", "Software") 
+            Select(driver.find_element(By.ID, "incident.category")).select_by_visible_text(cat_value)
+            
+            # 4.2 Impact: Fix เป็น "5 - Minor"
             Select(driver.find_element(By.ID, "incident.impact")).select_by_visible_text("5 - Minor")
+            
+            # 4.3 Urgency: Fix เป็น "5 - Minor"
             Select(driver.find_element(By.ID, "incident.urgency")).select_by_visible_text("5 - Minor")
-            print("  ✅ เลือก Dropdowns สำเร็จ")
+            
+            print("  ✅ ตั้งค่า Dropdowns สำเร็จ")
         except Exception as e:
-            print(f"  ⚠️ ไม่สามารถเลือกบาง Dropdown ได้ (อาจจะค่าไม่ตรงเป๊ะ): {e}")
+            print(f"  ⚠️ ไม่สามารถเลือก Dropdown ได้ (ตรวจสอบว่าตัวเลือกในเว็บตรงกับที่พิมพ์ไหม): {e}")
 
-        # 5. Tab External Reference
-        print("- สลับไป Tab External References...")
+        # 5. สลับไป Tab External Reference และกรอกข้อมูล
         try:
+            print("- สลับไป Tab External References...")
             tab_element = driver.find_element(By.XPATH, "//span[contains(text(), 'External References')]")
             driver.execute_script("arguments[0].click();", tab_element)
             time.sleep(1)
 
-            # กรอก ID: incident.u_extrefno4
+            # กรอก ID จริง: incident.u_extrefno4
+            print("- กรอก External Ref No 4...")
             ext_ref = driver.find_element(By.ID, "incident.u_extrefno4")
             ext_ref.clear()
             ext_ref.send_keys(data.get("ticket_id", ""))
@@ -150,7 +149,7 @@ if __name__ == "__main__":
         try:
             driver = webdriver.Chrome(options=chrome_options)
             wait = WebDriverWait(driver, 15)
-            print("🤖 บอทพร้อมรันระบบ UAT! (เวอร์ชันเก็บครบทุกช่อง)")
+            print("🤖 บอทพร้อมรันระบบ UAT! (เวอร์ชันปรับจูนตาม HTML)")
 
             while True:
                 doc_id, doc_data = get_and_lock_ticket(db)

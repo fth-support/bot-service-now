@@ -51,75 +51,80 @@ def mark_as_completed(db, doc_id):
         print(f"❌ Error Firestore Update: {e}")
 
 # ==========================================
-# ส่วนที่ 2: ควบคุม ServiceNow UAT
+# ส่วนที่ 2: ควบคุม ServiceNow UAT (Step-by-Step)
 # ==========================================
 def fill_servicenow_ticket(driver, wait, data):
     try:
-        print(f"🚀 เริ่มสร้าง Ticket: {data.get('description', 'No Subject')}")
+        print(f"🚀 เริ่มกระบวนการสร้าง Ticket: {data.get('description', 'No Subject')}")
         
-        # บังคับหน้าจอให้เป็นปัจจุบันและออกจาก Iframe ทั้งหมด
-        driver.switch_to.default_content()
-        uat_form_url = "https://keristest.service-now.com/incident.do?sys_id=-1"
-        driver.get(uat_form_url)
-        
-        print("⏳ รอหน้าฟอร์มโหลด...")
-        time.sleep(6) 
+        # 1. ไปที่หน้า List URL ที่คุณส่งมา
+        list_url = "https://keristest.service-now.com/now/nav/ui/classic/params/target/incident_list.do%3Fsysparm_query%3Dactive%3Dtrue"
+        driver.get(list_url)
+        time.sleep(5)
 
-        # 1. Short Description
+        # --- ⚡ จุดสำคัญ: มุดเข้า Iframe เพื่อหาปุ่ม New ⚡ ---
+        driver.switch_to.default_content() # ออกมานอกสุดก่อน
+        try:
+            # ServiceNow Classic UI จะอยู่ใน iframe id 'gsft_main'
+            wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
+            print("📥 มุดเข้า iframe (gsft_main) สำเร็จ")
+        except:
+            print("⚠️ ไม่เจอ iframe หรืออยู่ในหน้าตรงอยู่แล้ว")
+
+        # 2. คลิกปุ่ม "New"
+        print("🖱️ กำลังคลิกปุ่ม New...")
+        new_button = wait.until(EC.element_to_be_clickable((By.ID, "sysverb_new")))
+        new_button.click()
+        
+        # รอให้หน้า Form โหลด (ยังอยู่ใน iframe เดิม)
+        time.sleep(4)
+
+        # 3. กรอก Short Description
         print("- กรอก Short Description...")
         short_desc = wait.until(EC.presence_of_element_located((By.ID, "incident.short_description")))
         short_desc.clear()
         short_desc.send_keys(data.get("description", ""))
 
-        # 2. Caller
+        # 4. กรอก Caller
         print("- กรอก Caller...")
         caller_field = driver.find_element(By.ID, "sys_display.incident.caller_id")
         caller_field.clear()
         caller_field.send_keys(data.get("caller", ""), Keys.RETURN)
         time.sleep(2)
 
-        # 3. Assignment Group (จุดที่เพิ่มใหม่!)
-        print("- กรอก Assignment Group (FTH Call Center)...")
+        # 5. กรอก Assignment Group (FTH Call Center)
+        print("- กรอก Assignment Group...")
         ag_field = driver.find_element(By.ID, "sys_display.incident.assignment_group")
         ag_field.clear()
         ag_field.send_keys("FTH Call Center", Keys.RETURN)
         time.sleep(2)
 
-        # --- ⚡ ส่วนจัดการ Tab และ External Reference ⚡ ---
+        # 6. จัดการ Tab และ External Ref No 4
         print("- กำลังสลับไป Tab External References...")
         try:
-            # ใช้ JavaScript คลิกที่ชื่อ Tab เพื่อความชัวร์
-            tab_script = """
-            var tabs = document.getElementsByClassName('tab_caption_text');
-            for (var i = 0; i < tabs.length; i++) {
-                if (tabs[i].innerText === 'External References') {
-                    tabs[i].click();
-                    return true;
-                }
-            }
-            return false;
-            """
-            driver.execute_script(tab_script)
-            time.sleep(1.5) # รอ Tab กางออก
+            # คลิก Tab โดยหาจาก text
+            tab_element = driver.find_element(By.XPATH, "//span[contains(text(), 'External References')]")
+            driver.execute_script("arguments[0].click();", tab_element)
+            time.sleep(1)
 
-            # กรอกข้อมูลลง ID จริง: incident.u_extrefno4
+            # กรอก ID: incident.u_extrefno4
             print("- กรอก External Ref No 4...")
-            ext_ref_field = wait.until(EC.element_to_be_clickable((By.ID, "incident.u_extrefno4")))
-            ext_ref_field.clear()
-            ext_ref_field.send_keys(data.get("ticket_id", ""))
-            print("  ✅ กรอก External Ref No 4 สำเร็จ!")
-        except Exception as ex:
-            print(f"  ⚠️ มีปัญหาในการกรอก External Ref: {ex}")
+            ext_ref = driver.find_element(By.ID, "incident.u_extrefno4")
+            ext_ref.clear()
+            ext_ref.send_keys(data.get("ticket_id", ""))
+            print("  ✅ กรอก External Ref สำเร็จ")
+        except Exception as e:
+            print(f"  ⚠️ หา Tab หรือช่อง External Ref ไม่เจอ: {e}")
 
-        # 4. กด Save (Submit)
-        print("💾 กำลังกดบันทึก...")
+        # 7. กด Save (Submit)
+        print("💾 กำลังกดบันทึก (Submit)...")
         driver.find_element(By.ID, "sysverb_insert").click()
         
         time.sleep(5) 
         return True 
 
     except Exception as e:
-        print(f"❌ Error ServiceNow UAT: {e}")
+        print(f"❌ Error ServiceNow Flow: {e}")
         return False
 
 # ==========================================
@@ -133,7 +138,7 @@ if __name__ == "__main__":
         try:
             driver = webdriver.Chrome(options=chrome_options)
             wait = WebDriverWait(driver, 15)
-            print("🤖 บอทพร้อมรันระบบ UAT! (เฝ้าดูสถานะ on process)")
+            print("🤖 บอทพร้อมรันระบบ UAT! (โหมด Iframe Handling)")
 
             while True:
                 doc_id, doc_data = get_and_lock_ticket(db)

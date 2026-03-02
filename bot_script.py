@@ -55,23 +55,17 @@ def mark_as_completed(db, doc_id):
 # ==========================================
 def fill_servicenow_ticket(driver, wait, data):
     try:
-        print(f"🚀 กำลังพาหน้าจอไปที่ระบบ UAT...")
+        print(f"🚀 เริ่มสร้าง Ticket: {data.get('description', 'No Subject')}")
         
-        # --- ⚡ ท่าแก้ปัญหาหน้าจอไม่ขยับ ⚡ ---
-        driver.switch_to.default_content() # เคลียร์ iframe เก่าออกให้หมด
-        
-        # ใช้ URL ตรงสำหรับสร้าง record ใหม่บน Domain UAT ของคุณ
-        # (อิงจาก URL ที่คุณส่งมา: keristest.service-now.com)
+        # บังคับหน้าจอให้เป็นปัจจุบัน
+        driver.switch_to.default_content()
         uat_form_url = "https://keristest.service-now.com/incident.do?sys_id=-1"
         driver.get(uat_form_url)
         
-        # บังคับ Focus หน้าต่าง Chrome
-        driver.execute_script("window.focus();")
-        
-        print("⏳ รอหน้าจอโหลดฟอร์มใหม่...")
+        print("⏳ รอหน้าฟอร์มโหลด...")
         time.sleep(6) 
 
-        # 1. กรอก Short Description (จากฟิลด์ description ใน Firebase)
+        # 1. กรอก Short Description
         print("- กรอก Short Description...")
         short_desc = wait.until(EC.presence_of_element_located((By.ID, "incident.short_description")))
         short_desc.clear()
@@ -84,18 +78,24 @@ def fill_servicenow_ticket(driver, wait, data):
         caller_field.send_keys(data.get("caller", ""), Keys.RETURN)
         time.sleep(2)
 
-        # 3. กรอก External Ref No 4 (จากฟิลด์ ticket_id ใน Firebase)
-        print("- กรอก External Ref No 4...")
+        # --- ⚡ จุดที่แก้ไข: External References ⚡ ---
+        print("- กำลังเข้าถึง Tab External References...")
         try:
-            # ใช้พิกัด ID ตรงสำหรับช่อง External Ref 4
-            ext_ref = driver.find_element(By.ID, "incident.u_external_ref_no_4") 
-            ext_ref.clear()
-            ext_ref.send_keys(data.get("ticket_id", ""))
-            print("  ✅ กรอก External Ref No 4 เรียบร้อย")
-        except:
-            print("  ⚠️ หาช่อง External Ref No 4 ไม่เจอ (ข้ามไปก่อน)")
+            # คลิกที่ชื่อ Tab เพื่อให้ฟิลด์ปรากฏและ Interact ได้
+            tab_element = driver.find_element(By.XPATH, "//*[contains(text(), 'External References')]")
+            driver.execute_script("arguments[0].click();", tab_element)
+            time.sleep(1)
 
-        # 4. กด Save (Submit)
+            # กรอกข้อมูลลง ID จริงที่ได้จาก HTML: incident.u_extrefno4
+            print("- กำลังกรอก External Ref No 4...")
+            ext_ref_field = wait.until(EC.element_to_be_clickable((By.ID, "incident.u_extrefno4")))
+            ext_ref_field.clear()
+            ext_ref_field.send_keys(data.get("ticket_id", ""))
+            print("  ✅ กรอก External Ref No 4 สำเร็จ!")
+        except Exception as ex:
+            print(f"  ⚠️ ไม่สามารถกรอก External Ref ได้: {ex}")
+
+        # 4. กด Save
         print("💾 กำลังกดบันทึก...")
         driver.find_element(By.ID, "sysverb_insert").click()
         
@@ -105,7 +105,7 @@ def fill_servicenow_ticket(driver, wait, data):
     except Exception as e:
         print(f"❌ Error ServiceNow UAT: {e}")
         return False
-
+        
 # ==========================================
 # Main Loop
 # ==========================================

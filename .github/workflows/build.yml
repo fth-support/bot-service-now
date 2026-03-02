@@ -26,7 +26,7 @@ jobs:
 
     - name: Build EXE with PyInstaller
       run: |
-        # รวบรวมทุกอย่างที่จำเป็นสำหรับ Firestore และ Selenium
+        # รวบรวม module ที่จำเป็นทั้งหมดสำหรับ Firestore และ Selenium เข้าในไฟล์เดียว
         pyinstaller --onefile `
         --collect-all selenium `
         --collect-all firebase_admin `
@@ -36,5 +36,5 @@ jobs:
     - name: Upload EXE as Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ServiceNow-Bot-App
+        name: ServiceNow-Bot-UAT
         path: dist/bot_script.exe

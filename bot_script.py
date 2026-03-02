@@ -10,7 +10,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # ==========================================
-# ส่วนที่ 1: จัดการ Firestore (System Lock)
+# ส่วนที่ 1: จัดการ Firestore
 # ==========================================
 def initialize_firestore():
     try:
@@ -46,82 +46,73 @@ def get_and_lock_ticket(db):
 def mark_as_completed(db, doc_id):
     try:
         db.collection("incidents").document(doc_id).update({"status": "Completed"})
-        print(f"✅ [Firestore] อัปเดตสถานะงาน {doc_id} เป็น Completed")
+        print(f"✅ [Firestore] ปิดงาน {doc_id} สมบูรณ์")
     except Exception as e:
         print(f"❌ Error Firestore Update: {e}")
 
 # ==========================================
-# ส่วนที่ 2: ควบคุม ServiceNow UAT (Step-by-Step)
+# ส่วนที่ 2: ควบคุม ServiceNow UAT
 # ==========================================
 def fill_servicenow_ticket(driver, wait, data):
     try:
-        print(f"🚀 เริ่มกระบวนการสร้าง Ticket: {data.get('description', 'No Subject')}")
+        print(f"🚀 เริ่มสร้าง Ticket: {data.get('description', 'No Subject')}")
         
-        # 1. ไปที่หน้า List URL
-        list_url = "https://keristest.service-now.com/now/nav/ui/classic/params/target/incident_list.do%3Fsysparm_query%3Dactive%3Dtrue"
-        driver.get(list_url)
-        time.sleep(5)
+        # --- ⚡ ท่าไม้ตาย: พุ่งตรงไปหน้า New Form (ตัดปัญหาปุ่ม New หาย) ⚡ ---
+        # ใช้ URL ที่เข้าหน้าสร้าง Incident ใหม่โดยตรง (Direct URL)
+        new_incident_url = "https://keristest.service-now.com/incident.do?sys_id=-1"
+        driver.get(new_incident_url)
+        
+        print("⏳ กำลังโหลดหน้าฟอร์มใหม่...")
+        time.sleep(5) 
 
-        # --- ⚡ ท่าแก้ปัญหา: เคลียร์ Frame และมุดใหม่ให้ชัวร์ ⚡ ---
+        # ตรวจสอบว่าต้องมุด iframe ไหม (กรณี ServiceNow ครอบ UI ไว้)
         driver.switch_to.default_content()
         try:
-            # รอจนกว่า iframe 'gsft_main' จะโผล่มาแล้วค่อยมุด
-            wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
-            print("📥 มุดเข้า iframe (gsft_main) สำเร็จ")
+            # ลองหาฟิลด์ Short Description ถ้าไม่เจอแสดงว่าอาจติด iframe
+            if not driver.find_elements(By.ID, "incident.short_description"):
+                wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
+                print("📥 มุดเข้า iframe (gsft_main) สำเร็จ")
         except:
-            print("⚠️ ไม่เจอ iframe หรืออยู่ในหน้าตรงอยู่แล้ว")
+            pass
 
-        # --- ⚡ ท่าแก้ปัญหา: บังคับกดปุ่ม New ด้วย JavaScript ⚡ ---
-        print("🖱️ กำลังบังคับคลิกปุ่ม New...")
-        try:
-            # ค้นหาปุ่มด้วย ID ที่ได้จาก HTML
-            new_btn = wait.until(EC.presence_of_element_located((By.ID, "sysverb_new")))
-            # ใช้ JavaScript คลิกเพื่อเลี่ยงปัญหาโดน element อื่นบัง
-            driver.execute_script("arguments[0].click();", new_btn)
-            print("✅ คลิกปุ่ม New สำเร็จ")
-        except Exception as e:
-            print(f"❌ หาปุ่ม New หรือคลิกไม่ได้: {e}")
-            # ถ้าท่าแรกพลาด ลองกดผ่านฟังก์ชันของ ServiceNow โดยตรง
-            driver.execute_script("GlideList2.get('incident').action('710fa8d1db7ff200e08070d9bf96198b', 'sysverb_new');")
-            print("⚡ พยายามกดผ่าน GlideList2 Action แทน")
-
-        # รอหน้าฟอร์มกางออก (ยังอยู่ใน iframe)
-        time.sleep(5)
-
-        # --- ส่วนการกรอกข้อมูล (เหมือนเดิม) ---
+        # 1. กรอก Short Description (จากฟิลด์ description)
         print("- กรอก Short Description...")
         short_desc = wait.until(EC.presence_of_element_located((By.ID, "incident.short_description")))
         short_desc.clear()
         short_desc.send_keys(data.get("description", ""))
 
+        # 2. กรอก Caller
         print("- กรอก Caller...")
         caller_field = driver.find_element(By.ID, "sys_display.incident.caller_id")
         caller_field.clear()
         caller_field.send_keys(data.get("caller", ""), Keys.RETURN)
         time.sleep(2)
 
-        print("- กรอก Assignment Group...")
+        # 3. กรอก Assignment Group (FTH Call Center)
+        print("- กรอก Assignment Group (FTH Call Center)...")
         ag_field = driver.find_element(By.ID, "sys_display.incident.assignment_group")
         ag_field.clear()
         ag_field.send_keys("FTH Call Center", Keys.RETURN)
         time.sleep(2)
 
-        # จัดการ Tab External References
+        # 4. กรอก External Ref No 4 (ใช้ ID จริง: incident.u_extrefno4)
+        print("- สลับไป Tab External References และกรอกข้อมูล...")
         try:
-            print("- สลับไป Tab External References...")
+            # คลิก Tab ก่อน (หาจากชื่อ Tab)
             tab_element = driver.find_element(By.XPATH, "//span[contains(text(), 'External References')]")
             driver.execute_script("arguments[0].click();", tab_element)
             time.sleep(1)
 
-            print("- กรอก External Ref No 4...")
-            ext_ref = driver.find_element(By.ID, "incident.u_extrefno4")
+            # กรอกข้อมูลลงช่อง ID: incident.u_extrefno4
+            ext_ref = wait.until(EC.visibility_of_element_located((By.ID, "incident.u_extrefno4")))
             ext_ref.clear()
             ext_ref.send_keys(data.get("ticket_id", ""))
-        except:
-            print("⚠️ มีปัญหาที่ส่วน External Reference")
+            print("  ✅ กรอก External Ref สำเร็จ")
+        except Exception as ex:
+            print(f"  ⚠️ หา Tab หรือช่อง External Ref ไม่เจอ: {ex}")
 
-        # 7. กด Save (Submit)
-        print("💾 กำลังกดบันทึก (Submit)...")
+        # 5. กด Save (Submit)
+        print("💾 กำลังกดบันทึก...")
         driver.find_element(By.ID, "sysverb_insert").click()
         
         time.sleep(5) 
@@ -132,7 +123,7 @@ def fill_servicenow_ticket(driver, wait, data):
         return False
 
 # ==========================================
-# Main Loop
+# Main: ระบบ Loop
 # ==========================================
 if __name__ == "__main__":
     db = initialize_firestore()
@@ -142,7 +133,7 @@ if __name__ == "__main__":
         try:
             driver = webdriver.Chrome(options=chrome_options)
             wait = WebDriverWait(driver, 15)
-            print("🤖 บอทพร้อมรันระบบ UAT! (โหมด Iframe Handling)")
+            print("🤖 บอทพร้อมรันระบบ UAT! (โหมด Direct Link)")
 
             while True:
                 doc_id, doc_data = get_and_lock_ticket(db)

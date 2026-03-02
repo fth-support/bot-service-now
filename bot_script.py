@@ -11,7 +11,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # ==========================================
-# ส่วนที่ 1: จัดการ Firestore (ระบบ Lock)
+# ส่วนที่ 1: จัดการ Firestore (ดึงจาก status: on process)
 # ==========================================
 def initialize_firestore():
     try:
@@ -26,16 +26,19 @@ def initialize_firestore():
         return None
 
 def get_and_lock_ticket(db):
+    print("\n🔍 กำลังตรวจสอบงานใหม่จาก Firestore (status: on process)...")
     try:
+        # ปรับการค้นหาตามภาพล่าสุดของคุณ: status == "on process"
         docs = db.collection("incidents") \
-                 .where("status", "==", "Pending") \
+                 .where("status", "==", "on process") \
                  .where("is_pulled", "==", False) \
                  .limit(1).get()
+        
         for doc in docs:
             doc_id = doc.id
             doc_data = doc.to_dict()
             db.collection("incidents").document(doc_id).update({"is_pulled": True})
-            print(f"\n🔒 ล็อกงาน {doc_id} เรียบร้อย...")
+            print(f"🔒 ล็อกงาน {doc_id} เรียบร้อย (กำลังเริ่มสร้างใน UAT)")
             return doc_id, doc_data
         return None, None
     except Exception as e:
@@ -45,49 +48,47 @@ def get_and_lock_ticket(db):
 def mark_as_completed(db, doc_id):
     try:
         db.collection("incidents").document(doc_id).update({"status": "Completed"})
-        print(f"✅ [Firestore] ปรับสถานะเป็น Completed")
+        print(f"✅ [Firestore] ปิดงาน {doc_id} สมบูรณ์")
     except Exception as e:
         print(f"❌ Error Firestore Update: {e}")
 
 # ==========================================
-# ส่วนที่ 2: ควบคุม ServiceNow (สั้น ชับ ตาม ID จริง)
+# ส่วนที่ 2: ควบคุม ServiceNow (UAT Version)
 # ==========================================
 def fill_servicenow_ticket(driver, wait, data):
     try:
-        print(f"🚀 เริ่มสร้าง Ticket: {data.get('short_description', 'No Subject')}")
-        driver.get("https://keris.service-now.com/incident.do?sys_id=-1")
+        print(f"🚀 เริ่มสร้าง Ticket ในระบบ UAT: {data.get('description', 'No Subject')}")
+        # เปลี่ยนเป็น URL UAT ตามที่คุณระบุ (ใช้ Raw Form เพื่อความเสถียร)
+        uat_form_url = "https://keristest.service-now.com/incident.do?sys_id=-1"
+        driver.get(uat_form_url)
         
-        # ⏳ รอหน้าฟอร์มโหลด (ให้ช่อง Short Description ขึ้นมาเป็นสัญญาณ)
-        wait.until(EC.presence_of_element_located((By.ID, "incident.short_description")))
+        # รอให้หน้าฟอร์มกางตัวออก
+        time.sleep(6) 
 
-        # --- 1. เลือก Demand (ใช้ ID จริงที่เพิ่งเจอ: incident.u_demand) ---
-        print("- กำลังเลือก Sense & Respond Demand...")
-        Select(driver.find_element(By.ID, "incident.u_demand")).select_by_visible_text("Retail Solution & Delivery")
+        # --- จุดที่ 1: กรอกแต่ Short Description (ดึงจาก description ใน Firebase) ---
+        print("- กำลังกรอก Short Description...")
+        driver.find_element(By.ID, "incident.short_description").clear()
+        driver.find_element(By.ID, "incident.short_description").send_keys(data.get("description", ""))
 
-        # --- 2. กรอก Caller (ใช้ sys_display) ---
+        # --- ฟิลด์บังคับอื่นๆ (Caller) ---
         print("- กำลังกรอก Caller...")
         caller_field = driver.find_element(By.ID, "sys_display.incident.caller_id")
         caller_field.clear()
         caller_field.send_keys(data.get("caller", ""), Keys.RETURN)
         time.sleep(2)
-        
-        # --- 3. ฟิลด์มาตรฐาน (สั้นๆ แบบ Urgency) ---
-        driver.find_element(By.ID, "incident.short_description").send_keys(data.get("short_description", ""))
-        driver.find_element(By.ID, "incident.description").send_keys(data.get("description", ""))
-        
-        Select(driver.find_element(By.ID, "incident.category")).select_by_visible_text(data.get("category", "Software"))
-        Select(driver.find_element(By.ID, "incident.impact")).select_by_visible_text(data.get("impact", "5 - Minor"))
-        Select(driver.find_element(By.ID, "incident.urgency")).select_by_visible_text(data.get("urgency", "5 - Minor"))
-        
-        # --- 4. Assignment Group & Reported By ---
-        driver.find_element(By.ID, "sys_display.incident.assignment_group").send_keys("FTH ISS3000 MALL", Keys.RETURN)
-        time.sleep(2)
 
-        driver.find_element(By.ID, "sys_display.incident.u_reported_by").send_keys(data.get("reported_by", "DON-001"), Keys.RETURN)
-        time.sleep(2)
-
-        # Mitigate SLA
-        driver.find_element(By.ID, "incident.u_mitigate_sla_description").send_keys(data.get("contact_info", ""))
+        # --- จุดที่ 2: กรอก External Ref No 4 (ticket_id จาก Firebase) ---
+        print("- กำลังค้นหาและกรอก External Ref No 4...")
+        try:
+            # ปกติ ServiceNow ฟิลด์ใน Tab จะโหลดมาใน DOM อยู่แล้ว 
+            # ID มักจะขึ้นต้นด้วย incident.u_... รบกวนคุณ Inspect ดู ID จริงอีกครั้งถ้าตัวนี้ไม่ทำงาน
+            # ผมใช้ Selector แบบกวาดหาคำว่า external_ref_no_4
+            ext_ref_field = driver.find_element(By.CSS_SELECTOR, "input[id*='external_ref_no_4']")
+            ext_ref_field.clear()
+            ext_ref_field.send_keys(data.get("ticket_id", ""))
+            print("  ✅ กรอก External Ref No 4 สำเร็จ")
+        except:
+            print("  ⚠️ คำเตือน: หาช่อง External Ref No 4 ไม่เจอ (อาจต้องคลิก Tab ก่อน หรือ ID ไม่ตรง)")
 
         # --- 5. กด Save ---
         print("💾 กำลังกดบันทึก...")
@@ -97,7 +98,7 @@ def fill_servicenow_ticket(driver, wait, data):
         return True 
 
     except Exception as e:
-        print(f"❌ Error ServiceNow: {e}")
+        print(f"❌ Error ServiceNow UAT: {e}")
         return False
 
 # ==========================================
@@ -111,7 +112,7 @@ if __name__ == "__main__":
         try:
             driver = webdriver.Chrome(options=chrome_options)
             wait = WebDriverWait(driver, 15)
-            print("🤖 บอทพร้อมทำงาน! กำลังเฝ้า Firestore...")
+            print("🤖 บอทพร้อมทำงานบนระบบ UAT! (เฝ้าดูสถานะ on process)")
 
             while True:
                 doc_id, doc_data = get_and_lock_ticket(db)
@@ -119,10 +120,10 @@ if __name__ == "__main__":
                     if fill_servicenow_ticket(driver, wait, doc_data):
                         mark_as_completed(db, doc_id)
                     else:
-                        print(f"⚠️ งาน {doc_id} มีปัญหา (ตรวจสอบ is_pulled ใน Firestore)")
+                        print(f"⚠️ งาน {doc_id} มีปัญหาบนเว็บ UAT")
                 else:
                     print(".", end="", flush=True)
                 time.sleep(15)
         except Exception as e:
-            print(f"❌ ไม่พบ Chrome โหมด Debug: {e}")
+            print(f"❌ ไม่พบ Chrome โหมด Debug (Port 9222): {e}")
             input("กด Enter เพื่อปิด...")

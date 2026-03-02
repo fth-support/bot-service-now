@@ -57,64 +57,68 @@ def fill_servicenow_ticket(driver, wait, data):
     try:
         print(f"🚀 เริ่มกระบวนการสร้าง Ticket: {data.get('description', 'No Subject')}")
         
-        # 1. ไปที่หน้า List URL ที่คุณส่งมา
+        # 1. ไปที่หน้า List URL
         list_url = "https://keristest.service-now.com/now/nav/ui/classic/params/target/incident_list.do%3Fsysparm_query%3Dactive%3Dtrue"
         driver.get(list_url)
         time.sleep(5)
 
-        # --- ⚡ จุดสำคัญ: มุดเข้า Iframe เพื่อหาปุ่ม New ⚡ ---
-        driver.switch_to.default_content() # ออกมานอกสุดก่อน
+        # --- ⚡ ท่าแก้ปัญหา: เคลียร์ Frame และมุดใหม่ให้ชัวร์ ⚡ ---
+        driver.switch_to.default_content()
         try:
-            # ServiceNow Classic UI จะอยู่ใน iframe id 'gsft_main'
+            # รอจนกว่า iframe 'gsft_main' จะโผล่มาแล้วค่อยมุด
             wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
             print("📥 มุดเข้า iframe (gsft_main) สำเร็จ")
         except:
             print("⚠️ ไม่เจอ iframe หรืออยู่ในหน้าตรงอยู่แล้ว")
 
-        # 2. คลิกปุ่ม "New"
-        print("🖱️ กำลังคลิกปุ่ม New...")
-        new_button = wait.until(EC.element_to_be_clickable((By.ID, "sysverb_new")))
-        new_button.click()
-        
-        # รอให้หน้า Form โหลด (ยังอยู่ใน iframe เดิม)
-        time.sleep(4)
+        # --- ⚡ ท่าแก้ปัญหา: บังคับกดปุ่ม New ด้วย JavaScript ⚡ ---
+        print("🖱️ กำลังบังคับคลิกปุ่ม New...")
+        try:
+            # ค้นหาปุ่มด้วย ID ที่ได้จาก HTML
+            new_btn = wait.until(EC.presence_of_element_located((By.ID, "sysverb_new")))
+            # ใช้ JavaScript คลิกเพื่อเลี่ยงปัญหาโดน element อื่นบัง
+            driver.execute_script("arguments[0].click();", new_btn)
+            print("✅ คลิกปุ่ม New สำเร็จ")
+        except Exception as e:
+            print(f"❌ หาปุ่ม New หรือคลิกไม่ได้: {e}")
+            # ถ้าท่าแรกพลาด ลองกดผ่านฟังก์ชันของ ServiceNow โดยตรง
+            driver.execute_script("GlideList2.get('incident').action('710fa8d1db7ff200e08070d9bf96198b', 'sysverb_new');")
+            print("⚡ พยายามกดผ่าน GlideList2 Action แทน")
 
-        # 3. กรอก Short Description
+        # รอหน้าฟอร์มกางออก (ยังอยู่ใน iframe)
+        time.sleep(5)
+
+        # --- ส่วนการกรอกข้อมูล (เหมือนเดิม) ---
         print("- กรอก Short Description...")
         short_desc = wait.until(EC.presence_of_element_located((By.ID, "incident.short_description")))
         short_desc.clear()
         short_desc.send_keys(data.get("description", ""))
 
-        # 4. กรอก Caller
         print("- กรอก Caller...")
         caller_field = driver.find_element(By.ID, "sys_display.incident.caller_id")
         caller_field.clear()
         caller_field.send_keys(data.get("caller", ""), Keys.RETURN)
         time.sleep(2)
 
-        # 5. กรอก Assignment Group (FTH Call Center)
         print("- กรอก Assignment Group...")
         ag_field = driver.find_element(By.ID, "sys_display.incident.assignment_group")
         ag_field.clear()
         ag_field.send_keys("FTH Call Center", Keys.RETURN)
         time.sleep(2)
 
-        # 6. จัดการ Tab และ External Ref No 4
-        print("- กำลังสลับไป Tab External References...")
+        # จัดการ Tab External References
         try:
-            # คลิก Tab โดยหาจาก text
+            print("- สลับไป Tab External References...")
             tab_element = driver.find_element(By.XPATH, "//span[contains(text(), 'External References')]")
             driver.execute_script("arguments[0].click();", tab_element)
             time.sleep(1)
 
-            # กรอก ID: incident.u_extrefno4
             print("- กรอก External Ref No 4...")
             ext_ref = driver.find_element(By.ID, "incident.u_extrefno4")
             ext_ref.clear()
             ext_ref.send_keys(data.get("ticket_id", ""))
-            print("  ✅ กรอก External Ref สำเร็จ")
-        except Exception as e:
-            print(f"  ⚠️ หา Tab หรือช่อง External Ref ไม่เจอ: {e}")
+        except:
+            print("⚠️ มีปัญหาที่ส่วน External Reference")
 
         # 7. กด Save (Submit)
         print("💾 กำลังกดบันทึก (Submit)...")

@@ -6,11 +6,12 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # ==========================================
-# ส่วนที่ 1: จัดการ Firestore (System Lock)
+# ส่วนที่ 1: จัดการ Firestore
 # ==========================================
 def initialize_firestore():
     try:
@@ -51,41 +52,35 @@ def mark_as_completed(db, doc_id):
         print(f"❌ Error Firestore Update: {e}")
 
 # ==========================================
-# ส่วนที่ 2: ควบคุม ServiceNow UAT (Force Focus)
+# ส่วนที่ 2: ควบคุม ServiceNow UAT
 # ==========================================
 def fill_servicenow_ticket(driver, wait, data):
     try:
         print(f"🚀 เริ่มสร้าง Ticket: {data.get('description', 'No Subject')}")
         
-        # --- ⚡ ท่าแก้ปัญหา: บังคับหา Tab ที่เราเปิด ServiceNow อยู่ ⚡ ---
+        # --- ⚡ ท่าบังคับ: ดึงหน้าต่างกลับมา Tab ปัจจุบัน ⚡ ---
         found_tab = False
         for handle in driver.window_handles:
             driver.switch_to.window(handle)
-            if "service-now" in driver.current_url.lower() or "incident" in driver.title.lower():
+            if "service-now" in driver.current_url.lower():
                 found_tab = True
                 break
-        
-        if not found_tab:
-            print("⚠️ ไม่เจอ Tab ServiceNow... กำลังเปิดหน้าใหม่ใน Tab ปัจจุบัน")
         
         # พุ่งตรงไปหน้าสร้าง Record ใหม่
         new_incident_url = "https://keristest.service-now.com/incident.do?sys_id=-1"
         driver.get(new_incident_url)
-        
-        # ดึงหน้าต่างขึ้นมาข้างหน้า (บาง Browser อาจไม่รองรับแต่ใส่ไว้กันเหนียว)
         driver.execute_script("window.focus();")
         
-        print(f"📍 บอทกำลังทำงานที่หน้าจอ: {driver.title}")
+        print("⏳ รอหน้าฟอร์มกางตัว...")
         time.sleep(5) 
 
-        # ตรวจสอบการมุด iframe 'gsft_main'
+        # มุดเข้า iframe 'gsft_main'
         driver.switch_to.default_content()
         try:
-            # รอจนกว่า iframe จะพร้อมแล้วค่อยมุด
             wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
             print("📥 มุดเข้า iframe (gsft_main) สำเร็จ")
         except:
-            print("ℹ️ ไม่พบ iframe (อาจจะโหลดหน้าตรง)")
+            pass
 
         # 1. Short Description
         print("- กรอก Short Description...")
@@ -107,10 +102,20 @@ def fill_servicenow_ticket(driver, wait, data):
         ag_field.send_keys("FTH Call Center", Keys.RETURN)
         time.sleep(2)
 
-        # 4. Tab External Reference
+        # 4. Category, Impact, Urgency (จุดที่เพิ่มใหม่!)
+        print("- เลือก Category, Impact, Urgency เป็น 5 - Minor...")
+        try:
+            # ใช้ท่า Select บรรทัดเดียวแบบที่ Urgency เคยทำได้
+            Select(driver.find_element(By.ID, "incident.category")).select_by_visible_text("5 - Minor")
+            Select(driver.find_element(By.ID, "incident.impact")).select_by_visible_text("5 - Minor")
+            Select(driver.find_element(By.ID, "incident.urgency")).select_by_visible_text("5 - Minor")
+            print("  ✅ เลือก Dropdowns สำเร็จ")
+        except Exception as e:
+            print(f"  ⚠️ ไม่สามารถเลือกบาง Dropdown ได้ (อาจจะค่าไม่ตรงเป๊ะ): {e}")
+
+        # 5. Tab External Reference
         print("- สลับไป Tab External References...")
         try:
-            # คลิก Tab 'External References'
             tab_element = driver.find_element(By.XPATH, "//span[contains(text(), 'External References')]")
             driver.execute_script("arguments[0].click();", tab_element)
             time.sleep(1)
@@ -123,7 +128,7 @@ def fill_servicenow_ticket(driver, wait, data):
         except Exception as e:
             print(f"  ⚠️ หา Tab หรือช่อง External Ref ไม่เจอ: {e}")
 
-        # 5. กด Save
+        # 6. กด Save
         print("💾 กำลังกดบันทึก...")
         driver.find_element(By.ID, "sysverb_insert").click()
         
@@ -145,7 +150,7 @@ if __name__ == "__main__":
         try:
             driver = webdriver.Chrome(options=chrome_options)
             wait = WebDriverWait(driver, 15)
-            print("🤖 บอทพร้อมรันระบบ UAT! (โหมด Force Window Focus)")
+            print("🤖 บอทพร้อมรันระบบ UAT! (เวอร์ชันเก็บครบทุกช่อง)")
 
             while True:
                 doc_id, doc_data = get_and_lock_ticket(db)

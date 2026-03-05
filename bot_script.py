@@ -12,7 +12,7 @@ from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 # ==========================================
-# ส่วนที่ 1: จัดการ Firestore (ใช้ FieldFilter แก้ Warning)
+# ส่วนที่ 1: จัดการ Firestore (แก้ Warning เรื่อง filter=)
 # ==========================================
 def initialize_firestore():
     try:
@@ -46,10 +46,10 @@ def get_sync_request_task(db):
 # ส่วนที่ 2: ฟังก์ชันควบคุม ServiceNow
 # ==========================================
 
-# --- 2.1 โหมดสร้าง Ticket (ดึงกลับมาครบถ้วนทุกบรรทัด) ---
+# --- 2.1 โหมดสร้าง Ticket (Full UI) ---
 def create_ticket_mode(driver, wait, data):
     try:
-        print(f"🚀 [โหมดสร้าง] เริ่มสร้าง Ticket: {data.get('ticket_id')}")
+        print(f"🚀 [โหมดสร้าง] เริ่มสร้าง Ticket สำหรับ: {data.get('ticket_id')}")
         driver.switch_to.default_content()
         driver.get("https://keristest.service-now.com/incident.do?sys_id=-1")
         time.sleep(5)
@@ -69,7 +69,7 @@ def create_ticket_mode(driver, wait, data):
         Select(driver.find_element(By.ID, "incident.impact")).select_by_visible_text("5 - Minor")
         Select(driver.find_element(By.ID, "incident.urgency")).select_by_visible_text("5 - Minor")
 
-        # สลับไป Tab External References
+        # สลับไป Tab External References และกรอกข้อมูล
         tab = driver.find_element(By.XPATH, "//span[contains(text(), 'External References')]")
         driver.execute_script("arguments[0].click();", tab)
         time.sleep(1)
@@ -80,54 +80,58 @@ def create_ticket_mode(driver, wait, data):
         print("✅ สร้าง Ticket สำเร็จ")
         return True
     except Exception as e:
-        print(f"❌ Error สร้าง: {e}")
+        print(f"❌ Error ในโหมดสร้าง: {e}")
         return False
 
-# --- 2.2 โหมดตรวจสอบสถานะ (Sync Status) - ท่าใหม่ Search "for text" ---
+# --- 2.2 โหมด Sync Status (ใช้ท่า Search for text และแก้ Dynamic ID) ---
 def sync_status_mode(driver, wait, data):
     try:
         ticket_id = data.get("ticket_id")
-        print(f"🔍 [โหมด Sync] ค้นหาด้วย Search for text: {ticket_id}")
+        print(f"🔍 [โหมด Sync] เริ่มค้นหา: {ticket_id}")
         
         # เข้าหน้า List
         driver.get("https://keristest.service-now.com/now/nav/ui/classic/params/target/incident_list.do%3Fsysparm_query%3Dactive%3Dtrue")
-        time.sleep(5)
+        time.sleep(6) # รอหน้าเว็บโหลดตาม HAR Timing
 
         driver.switch_to.default_content()
         wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
 
         # 1. เลือก Dropdown เป็น "for text" (zztextsearchyy)
+        # ใช้ CSS Selector แบบ Wildcard หา ID ที่ลงท้ายด้วย _select
         print("- ตั้งค่าการค้นหาเป็น 'for text'...")
-        # ใช้ CSS Selector ที่หา ID ลงท้ายด้วย _select เพื่อความยืดหยุ่น
-        search_dropdown = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "select[id$='_select']")))
-        Select(search_dropdown).select_by_value("zztextsearchyy")
+        search_dropdown_element = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "select[id$='_select']")))
+        search_dropdown = Select(search_dropdown_element)
+        search_dropdown.select_by_value("zztextsearchyy")
+        time.sleep(1)
 
-        # 2. กรอก Ticket ID ในช่อง Search และกด Enter
-        print(f"- กรอกเลขค้นหา: {ticket_id}")
+        # 2. กรอก Ticket ID ในช่อง Search (ID ลงท้ายด้วย _text) และกด Enter
+        print(f"- กรอกเลข INC: {ticket_id}")
         search_input = driver.find_element(By.CSS_SELECTOR, "input[id$='_text']")
         search_input.clear()
         search_input.send_keys(ticket_id)
-        search_input.send_keys(Keys.RETURN)
+        time.sleep(1)
+        search_input.send_keys(Keys.ENTER)
         
-        time.sleep(5) # รอผลลัพธ์แสดง
+        # รอให้ตารางโหลดผลลัพธ์
+        time.sleep(5)
 
         # 3. เช็คสถานะ State ในแถวแรกของตาราง
         try:
-            # ค้นหา Cell ในคอลัมน์ State
+            # ค้นหาข้อความในคอลัมน์ State
             state_cell = driver.find_element(By.XPATH, "//tr[contains(@class, 'list_row')][1]/td[contains(@data-column, 'state') or contains(@aria-label, 'State')]")
             current_state = state_cell.text.strip()
-            print(f"📍 สถานะปัจจุบัน: {current_state}")
+            print(f"📍 พบสถานะในระบบ: {current_state}")
             return current_state
         except:
-            print("⚠️ ไม่พบ Record จากการค้นหา")
+            print("⚠️ ไม่พบแถวข้อมูลจากการค้นหา")
             return "Not Found"
 
     except Exception as e:
-        print(f"❌ Error Sync: {e}")
+        print(f"❌ Error ในโหมด Sync: {e}")
         return "Error"
 
 # ==========================================
-# Main Loop (สลับทำงาน 2 โหมด)
+# Main Loop (Dual Mode)
 # ==========================================
 if __name__ == "__main__":
     db = initialize_firestore()
@@ -137,16 +141,16 @@ if __name__ == "__main__":
         try:
             driver = webdriver.Chrome(options=chrome_options)
             wait = WebDriverWait(driver, 15)
-            print("🤖 บอท Master พร้อมรัน! (โหมด Search for text ลื่นไหลกว่าเดิม)")
+            print("🤖 บอท Master พร้อมรัน! (โหมดแก้ Dynamic ID และ Search for text)")
 
             while True:
-                # ภารกิจสร้าง
+                # ภารกิจ A: สร้างงานใหม่
                 c_id, c_data = get_create_task(db)
                 if c_id:
                     if create_ticket_mode(driver, wait, c_data):
                         db.collection("incidents").document(c_id).update({"status": "Completed"})
 
-                # ภารกิจ Sync
+                # ภารกิจ B: ตรวจสอบสถานะ (Request)
                 s_id, s_data = get_sync_request_task(db)
                 if s_id:
                     res = sync_status_mode(driver, wait, s_data)
@@ -155,7 +159,7 @@ if __name__ == "__main__":
                             "status": "Completed",
                             "sync_status": "Done"
                         })
-                        print(f"🎉 Sync สำเร็จ: {s_id}")
+                        print(f"🎉 Sync สำเร็จ: {s_id} เป็น Done")
 
                 print(".", end="", flush=True)
                 time.sleep(15)

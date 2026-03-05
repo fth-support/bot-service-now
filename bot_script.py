@@ -11,17 +11,17 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# --- ระบบ Debug Tool ---
+# --- 🛠️ ระบบ Debug Tool (ถ่ายรูปเมื่อพลาด) ---
 def save_debug_info(driver, task_id, phase):
     if not os.path.exists("debug_logs"):
         os.makedirs("debug_logs")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"debug_logs/{task_id}_{phase}_{timestamp}.png"
     driver.save_screenshot(filename)
-    print(f"📸 บันทึกภาพหน้าจอ Error ไว้ที่: {filename}")
+    print(f"📸 บันทึกภาพหน้าจอไว้ที่: {filename}")
 
 # ==========================================
-# ส่วนที่ 1: จัดการ Firestore
+# ส่วนที่ 1: จัดการ Firestore (แก้ Warning เรื่อง filter=)
 # ==========================================
 def initialize_firestore():
     try:
@@ -55,6 +55,49 @@ def get_sync_request_task(db):
 # ส่วนที่ 2: ฟังก์ชันควบคุม ServiceNow
 # ==========================================
 
+# --- 2.1 โหมดสร้าง Ticket (ดึงโค้ดที่เคยหายไปกลับมาครบถ้วน) ---
+def create_ticket_mode(driver, wait, data, task_id):
+    try:
+        print(f"🚀 [โหมดสร้าง] เริ่มสร้าง Ticket: {data.get('ticket_id')}")
+        driver.switch_to.default_content()
+        driver.get("https://keristest.service-now.com/incident.do?sys_id=-1")
+        time.sleep(5)
+        
+        # มุดเข้า Frame gsft_main
+        wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
+
+        # กรอกข้อมูล Short Description และ Caller
+        wait.until(EC.presence_of_element_located((By.ID, "incident.short_description"))).send_keys(data.get("description", ""))
+        driver.find_element(By.ID, "sys_display.incident.caller_id").send_keys(data.get("caller", ""), Keys.RETURN)
+        time.sleep(1)
+
+        # กรอก Assignment Group
+        ag_field = driver.find_element(By.ID, "sys_display.incident.assignment_group")
+        ag_field.clear()
+        ag_field.send_keys("FTH Call Center", Keys.RETURN)
+        time.sleep(1)
+
+        # เลือก Category, Impact, Urgency เป็น 5 - Minor
+        Select(driver.find_element(By.ID, "incident.category")).select_by_visible_text(data.get("category", "Software"))
+        Select(driver.find_element(By.ID, "incident.impact")).select_by_visible_text("5 - Minor")
+        Select(driver.find_element(By.ID, "incident.urgency")).select_by_visible_text("5 - Minor")
+
+        # สลับไป Tab External References และกรอกข้อมูล
+        tab = driver.find_element(By.XPATH, "//span[contains(text(), 'External References')]")
+        driver.execute_script("arguments[0].click();", tab)
+        time.sleep(1)
+        driver.find_element(By.ID, "incident.u_extrefno4").send_keys(data.get("ticket_id", ""))
+
+        # กด Submit
+        driver.find_element(By.ID, "sysverb_insert").click()
+        print("✅ สร้าง Ticket สำเร็จ")
+        return True
+    except Exception as e:
+        print(f"❌ Error สร้าง: {e}")
+        save_debug_info(driver, task_id, "create_error")
+        return False
+
+# --- 2.2 โหมดตรวจสอบสถานะ (Sync Status) ---
 def sync_status_mode(driver, wait, data, task_id):
     try:
         ticket_id = data.get("ticket_id")
@@ -67,87 +110,55 @@ def sync_status_mode(driver, wait, data, task_id):
         driver.switch_to.default_content()
         wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
 
-        # 1. จัดการปุ่ม Filter (เช็คสถานะจาก Element จริงที่คุณส่งมา)
+        # 1. คลิกปุ่ม Filter (เช็คก่อนกด)
         filter_btn = wait.until(EC.presence_of_element_located((By.ID, "incident_filter_toggle_image")))
         if filter_btn.get_attribute("aria-expanded") == "false":
             print("🖱️ คลิกเปิด Filter...")
-            driver.execute_script("arguments[0].click();", filter_btn)
-            time.sleep(3) # รอกางฟอร์ม 3 วิ
+            filter_btn.click()
+            time.sleep(3) # จังหวะรอโหลดฟอร์ม 2.8 วินาทีตาม HAR
 
-        # 2. เลือก "External Ref No 4" (จัดการ Select2)
-        print("- ตั้งค่าช่องแรก: External Ref No 4...")
-        # คลิกเพื่อให้กล่องค้นหาปรากฏ
+        # 2. จัดการ Select2 สำหรับ External Ref No 4
+        print("- เลือกฟิลด์: External Ref No 4...")
         s2_trigger = driver.find_element(By.CSS_SELECTOR, "a.select2-choice")
         driver.execute_script("arguments[0].click();", s2_trigger)
         time.sleep(1)
         
+        # ค้นหาใน Select2
         s2_input = wait.until(EC.visibility_of_element_located((By.ID, "s2id_autogen2_search")))
         s2_input.send_keys("External Ref No 4")
         time.sleep(1)
         s2_input.send_keys(Keys.RETURN)
         time.sleep(1)
 
-        # 3. เลือก "contains" (Operator)
-        op_select = Select(driver.find_element(By.CSS_SELECTOR, "select.condOperator"))
-        op_select.select_by_value("LIKE") # Value 'LIKE' คือ contains
+        # 3. เลือก contains (Operator)
+        Select(driver.find_element(By.CSS_SELECTOR, "select.condOperator")).select_by_value("LIKE")
 
-        # 4. กรอกเลข Ticket
+        # 4. กรอกเลข INC และกด Run
         val_input = driver.find_element(By.CSS_SELECTOR, "input.filerTableInput")
         val_input.clear()
         val_input.send_keys(ticket_id)
-
-        # 5. กด Run
-        print("🖱️ กด Run...")
-        run_btn = driver.find_element(By.ID, "test_filter_action_toolbar_run")
-        driver.execute_script("arguments[0].click();", run_btn)
+        
+        print("🖱️ กด Run Filter...")
+        driver.find_element(By.ID, "test_filter_action_toolbar_run").click()
         time.sleep(4)
 
-        # 6. เช็ค State
-        state_cell = driver.find_element(By.XPATH, "//tr[contains(@class, 'list_row')][1]/td[contains(@data-column, 'state') or contains(@aria-label, 'State')]")
-        status = state_cell.text.strip()
-        print(f"📍 สถานะปัจจุบัน: {status}")
-        return status
+        # 5. เช็คสถานะ State ในแถวแรก
+        try:
+            state_cell = driver.find_element(By.XPATH, "//tr[contains(@class, 'list_row')][1]/td[contains(@data-column, 'state') or contains(@aria-label, 'State')]")
+            status_text = state_cell.text.strip()
+            print(f"📍 สถานะปัจจุบัน: {status_text}")
+            return status_text
+        except:
+            print("⚠️ ไม่พบแถวข้อมูล")
+            return "Not Found"
 
     except Exception as e:
-        print(f"❌ Error ในโหมด Sync: {e}")
+        print(f"❌ Error Sync: {e}")
         save_debug_info(driver, task_id, "sync_error")
         return "Error"
 
-def create_ticket_mode(driver, wait, data, task_id):
-    try:
-        print(f"🚀 [โหมดสร้าง] เริ่มสร้าง Ticket: {data.get('description')}")
-        driver.switch_to.default_content()
-        driver.get("https://keristest.service-now.com/incident.do?sys_id=-1")
-        time.sleep(5)
-        
-        driver.switch_to.default_content()
-        wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
-
-        wait.until(EC.presence_of_element_located((By.ID, "incident.short_description"))).send_keys(data.get("description", ""))
-        driver.find_element(By.ID, "sys_display.incident.caller_id").send_keys(data.get("caller", ""), Keys.RETURN)
-        time.sleep(1)
-        driver.find_element(By.ID, "sys_display.incident.assignment_group").send_keys("FTH Call Center", Keys.RETURN)
-        
-        Select(driver.find_element(By.ID, "incident.category")).select_by_visible_text(data.get("category", "Software"))
-        Select(driver.find_element(By.ID, "incident.impact")).select_by_visible_text("5 - Minor")
-        Select(driver.find_element(By.ID, "incident.urgency")).select_by_visible_text("5 - Minor")
-
-        # Tab External References
-        tab = driver.find_element(By.XPATH, "//span[contains(text(), 'External References')]")
-        driver.execute_script("arguments[0].click();", tab)
-        time.sleep(1)
-        driver.find_element(By.ID, "incident.u_extrefno4").send_keys(data.get("ticket_id", ""))
-
-        driver.find_element(By.ID, "sysverb_insert").click()
-        print("✅ สร้าง Ticket สำเร็จ")
-        return True
-    except Exception as e:
-        print(f"❌ Error ในโหมดสร้าง: {e}")
-        save_debug_info(driver, task_id, "create_error")
-        return False
-
 # ==========================================
-# Main Loop
+# Main Loop (Dual Mode)
 # ==========================================
 if __name__ == "__main__":
     db = initialize_firestore()
@@ -157,16 +168,16 @@ if __name__ == "__main__":
         try:
             driver = webdriver.Chrome(options=chrome_options)
             wait = WebDriverWait(driver, 15)
-            print("🤖 บอท Master พร้อมทำงาน! (ระบบ Dual Mode + Debug Logger)")
+            print("🤖 บอท Master พร้อมรัน! (Full Code - Create & Sync)")
 
             while True:
-                # 1. ภารกิจสร้าง
+                # ภารกิจสร้าง Ticket
                 c_id, c_data = get_create_task(db)
                 if c_id:
                     if create_ticket_mode(driver, wait, c_data, c_id):
                         db.collection("incidents").document(c_id).update({"status": "Completed"})
 
-                # 2. ภารกิจ Sync
+                # ภารกิจ Sync Status (Request)
                 s_id, s_data = get_sync_request_task(db)
                 if s_id:
                     res = sync_status_mode(driver, wait, s_data, s_id)

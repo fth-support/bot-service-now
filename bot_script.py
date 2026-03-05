@@ -46,7 +46,6 @@ def get_and_lock_ticket(db):
 
 def get_sync_request_task(db):
     try:
-        # บอทจะดึงมาทำเฉพาะงานที่เป็น "Request" เท่านั้น
         docs = db.collection("incidents") \
                  .where("sync_status", "==", "Request") \
                  .limit(1).get()
@@ -62,18 +61,30 @@ def get_sync_request_task(db):
 # ส่วนที่ 2: ควบคุม ServiceNow UAT
 # ==========================================
 
-# ท่าบังคับ: ดึงบอทกลับมา Tab ปัจจุบัน (จุดที่ทำให้หน้าจอขยับ)
+# ⚡ ท่าไม้ตายปราบ Tab ผี: บังคับหา Tab ที่เป็นหน้าเว็บจริงๆ
 def force_active_tab(driver):
     try:
+        # วนหา Tab ที่เป็น http หรือ https เท่านั้น (ข้ามพวก chrome-extension://)
+        for handle in driver.window_handles:
+            driver.switch_to.window(handle)
+            if driver.current_url.startswith("http"):
+                # ดึงหน้าต่างขึ้นมาโชว์หน้าสุด
+                driver.maximize_window()
+                return
+                
+        # ถ้าไม่มี Tab หน้าเว็บเลย ให้เปิดใหม่
+        driver.execute_script("window.open('https://keristest.service-now.com', '_blank');")
         driver.switch_to.window(driver.window_handles[-1])
-    except: pass
+        driver.maximize_window()
+    except Exception as e:
+        print(f"⚠️ Error forcing tab: {e}")
 
 # --- งานที่ 2.1: สร้าง Ticket ---
 def fill_servicenow_ticket(driver, wait, data):
     try:
         print(f"🚀 เริ่มสร้าง Ticket: {data.get('description', 'No Subject')}")
         
-        # ⚡ ใส่กลับมาแล้วครับ! ดึงหน้าต่างมาแสดงผล
+        # บังคับหากหน้าจอจริงก่อนทำงาน
         force_active_tab(driver)
         driver.get("https://keristest.service-now.com/incident.do?sys_id=-1")
         
@@ -136,36 +147,25 @@ def fill_servicenow_ticket(driver, wait, data):
         print(f"❌ Error ServiceNow Flow: {e}")
         return False
 
-# --- งานที่ 2.2: Track / Monitor Status ---
+# --- งานที่ 2.2: Track / Monitor Status (ใช้ URL ทางลัดของคุณ) ---
 def check_sync_status(driver, wait, data):
     try:
         ticket_id = data.get("ticket_id")
         print(f"🔍 [Monitor] ค้นหาสถานะของ: {ticket_id}")
         
-        # ⚡ สั่งให้หน้าจอขยับ
         force_active_tab(driver)
-        driver.get("https://keristest.service-now.com/incident_list.do")
-        time.sleep(5)
+        
+        # ⚡ ใช้ URL ทางลัดที่ได้มาจากคุณ! (ไม่ต้องกดเลือก Dropdown หรือพิมพ์เองแล้ว)
+        search_url = f"https://keristest.service-now.com/incident_list.do?sysparm_query=GOTO123TEXTQUERY321%3d{ticket_id}"
+        print(f"- ยิง URL ค้นหาโดยตรง...")
+        driver.get(search_url)
+        time.sleep(6) # รอหน้าเว็บโหลดผลลัพธ์
 
         driver.switch_to.default_content()
         if driver.find_elements(By.ID, "gsft_main"):
             driver.switch_to.frame("gsft_main")
 
-        print("- เลือกโหมด 'for text'...")
-        search_dropdown_element = wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(@class, 'input-group-select')]//select")))
-        Select(search_dropdown_element).select_by_value("zztextsearchyy")
-        time.sleep(1)
-
-        print(f"- กรอกเลขค้นหา: {ticket_id}")
-        search_input = driver.find_element(By.XPATH, "//div[contains(@class, 'input-group')]//input[@type='search']")
-        search_input.clear()
-        search_input.send_keys(ticket_id)
-        time.sleep(1)
-        search_input.send_keys(Keys.ENTER)
-        
-        print("⏳ รอระบบโหลดผลลัพธ์...")
-        time.sleep(5) 
-
+        # เช็คสถานะ State ในตารางเลย
         try:
             state_cell = driver.find_element(By.XPATH, "//tr[contains(@class, 'list_row')][1]/td[contains(@data-column, 'state') or contains(@aria-label, 'State')]")
             current_state = state_cell.text.strip()
@@ -190,7 +190,7 @@ if __name__ == "__main__":
         try:
             driver = webdriver.Chrome(options=chrome_options)
             wait = WebDriverWait(driver, 15)
-            print("🤖 บอท UAT พร้อมทำงาน! (เวอร์ชัน Flow สมบูรณ์)")
+            print("🤖 บอท UAT พร้อมทำงาน! (แก้ Tab ผี + อัปเกรด URL ค้นหา)")
 
             while True:
                 # ==========================================
@@ -199,8 +199,7 @@ if __name__ == "__main__":
                 doc_id, doc_data = get_and_lock_ticket(db)
                 if doc_id:
                     if fill_servicenow_ticket(driver, wait, doc_data):
-                        # ⚡ เอาฟังก์ชัน mark_as_completed ออกแล้ว ให้ค้าง status "on process" ไว้
-                        print(f"✅ คีย์ Ticket เข้าเว็บเรียบร้อย (คงสถานะ 'on process' ไว้รอเช็ค)")
+                        print(f"✅ คีย์ Ticket เข้าเว็บเรียบร้อย (คงสถานะ 'on process' ไว้)")
 
                 # ==========================================
                 # ภารกิจที่ 2: MONITOR STATUS
@@ -210,7 +209,6 @@ if __name__ == "__main__":
                     res = check_sync_status(driver, wait, s_data)
                     
                     if res == "Resolved":
-                        # ⚡ ถ้าเป็น Resolved ถึงจะปรับสถานะหลักเป็น Completed
                         db.collection("incidents").document(s_id).update({
                             "status": "Completed",
                             "sync_status": "Done"
@@ -218,7 +216,6 @@ if __name__ == "__main__":
                         print(f"🎉 ตรวจพบ Resolved -> อัปเดต {s_id} เป็น Done และ Completed สำเร็จ!")
                         
                     elif res != "Error":
-                        # ถ้าเช็คแล้ว แต่ยังไม่ใช่ Resolved (เช่น เป็น Open หรือหาไม่เจอ)
                         db.collection("incidents").document(s_id).update({
                             "sync_status": "looked"
                         })

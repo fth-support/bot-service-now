@@ -35,5 +35,5 @@ jobs:
     - name: Upload EXE as Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ServiceNow-Bot-POC-Full
+        name: ServiceNow-Bot-Final-POC
         path: dist/bot_script.exe

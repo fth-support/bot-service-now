@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install selenium pyinstaller firebase-admin google-cloud-firestore
+        pip install selenium pyinstaller firebase-admin
 
     - name: Build EXE with PyInstaller
       run: |
@@ -35,5 +35,5 @@ jobs:
     - name: Upload EXE as Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ServiceNow-Bot-Final-POC
+        name: ServiceNow-Bot-UAT
         path: dist/bot_script.exe

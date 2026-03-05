@@ -61,18 +61,15 @@ def get_sync_request_task(db):
 # ส่วนที่ 2: ควบคุม ServiceNow UAT
 # ==========================================
 
-# ⚡ ท่าไม้ตายปราบ Tab ผี: บังคับหา Tab ที่เป็นหน้าเว็บจริงๆ
+# ท่าบังคับ: ดึงบอทกลับมา Tab ปัจจุบัน
 def force_active_tab(driver):
     try:
-        # วนหา Tab ที่เป็น http หรือ https เท่านั้น (ข้ามพวก chrome-extension://)
         for handle in driver.window_handles:
             driver.switch_to.window(handle)
             if driver.current_url.startswith("http"):
-                # ดึงหน้าต่างขึ้นมาโชว์หน้าสุด
                 driver.maximize_window()
                 return
                 
-        # ถ้าไม่มี Tab หน้าเว็บเลย ให้เปิดใหม่
         driver.execute_script("window.open('https://keristest.service-now.com', '_blank');")
         driver.switch_to.window(driver.window_handles[-1])
         driver.maximize_window()
@@ -84,7 +81,6 @@ def fill_servicenow_ticket(driver, wait, data):
     try:
         print(f"🚀 เริ่มสร้าง Ticket: {data.get('description', 'No Subject')}")
         
-        # บังคับหากหน้าจอจริงก่อนทำงาน
         force_active_tab(driver)
         driver.get("https://keristest.service-now.com/incident.do?sys_id=-1")
         
@@ -147,7 +143,7 @@ def fill_servicenow_ticket(driver, wait, data):
         print(f"❌ Error ServiceNow Flow: {e}")
         return False
 
-# --- งานที่ 2.2: Track / Monitor Status (ใช้ URL ทางลัดของคุณ) ---
+# --- งานที่ 2.2: Track / Monitor Status ---
 def check_sync_status(driver, wait, data):
     try:
         ticket_id = data.get("ticket_id")
@@ -155,7 +151,7 @@ def check_sync_status(driver, wait, data):
         
         force_active_tab(driver)
         
-        # ⚡ ใช้ URL ทางลัดที่ได้มาจากคุณ! (ไม่ต้องกดเลือก Dropdown หรือพิมพ์เองแล้ว)
+        # ยิง URL ค้นหาโดยตรง
         search_url = f"https://keristest.service-now.com/incident_list.do?sysparm_query=GOTO123TEXTQUERY321%3d{ticket_id}"
         print(f"- ยิง URL ค้นหาโดยตรง...")
         driver.get(search_url)
@@ -165,14 +161,19 @@ def check_sync_status(driver, wait, data):
         if driver.find_elements(By.ID, "gsft_main"):
             driver.switch_to.frame("gsft_main")
 
-        # เช็คสถานะ State ในตารางเลย
+        # ⚡ ปรับแก้: หาคำว่า "Resolved" แบบกวาดสายตาตามที่คุณแนะนำ
         try:
-            state_cell = driver.find_element(By.XPATH, "//tr[contains(@class, 'list_row')][1]/td[contains(@data-column, 'state') or contains(@aria-label, 'State')]")
-            current_state = state_cell.text.strip()
-            print(f"📍 สถานะปัจจุบัน: {current_state}")
-            return current_state
+            # ดึงข้อความทั้งหมดบนหน้าเว็บ (หรือในตารางผลลัพธ์) มาเช็คเลยว่ามีคำว่า Resolved ไหม
+            page_text = driver.find_element(By.TAG_NAME, "body").text
+            
+            if "Resolved" in page_text:
+                print("📍 พบคำว่า 'Resolved' ในหน้าเว็บ!")
+                return "Resolved"
+            else:
+                print("📍 ไม่พบคำว่า 'Resolved' (สถานะอาจยังเป็น Open)")
+                return "Open"
         except:
-            print("⚠️ ไม่พบ Record (อาจค้นหาไม่เจอ)")
+            print("⚠️ ไม่สามารถอ่านข้อมูลหน้าเว็บได้")
             return "Not Found"
 
     except Exception as e:
@@ -190,7 +191,7 @@ if __name__ == "__main__":
         try:
             driver = webdriver.Chrome(options=chrome_options)
             wait = WebDriverWait(driver, 15)
-            print("🤖 บอท UAT พร้อมทำงาน! (แก้ Tab ผี + อัปเกรด URL ค้นหา)")
+            print("🤖 บอท UAT พร้อมทำงาน! (อัปเกรดระบบตรวจจับ Resolved)")
 
             while True:
                 # ==========================================
@@ -219,7 +220,7 @@ if __name__ == "__main__":
                         db.collection("incidents").document(s_id).update({
                             "sync_status": "looked"
                         })
-                        print(f"👀 สถานะคือ '{res}' -> อัปเดต {s_id} เป็น 'looked' เพื่อข้ามการเช็คซ้ำ")
+                        print(f"👀 ไม่ใช่ Resolved -> อัปเดต {s_id} เป็น 'looked' เพื่อข้ามการเช็คซ้ำ")
 
                 # ปรินต์จุดแสดงว่าบอทยังทำงานอยู่
                 print(".", end="", flush=True)

@@ -58,17 +58,11 @@ def get_sync_request_task(db):
         print(f"❌ Error Firestore Sync: {e}")
         return None, None
 
-def mark_as_completed(db, doc_id):
-    try:
-        db.collection("incidents").document(doc_id).update({"status": "Completed"})
-        print(f"✅ [Firestore] ปรับสถานะเป็น Completed")
-    except Exception as e:
-        print(f"❌ Error Firestore Update: {e}")
-
 # ==========================================
 # ส่วนที่ 2: ควบคุม ServiceNow UAT
 # ==========================================
 
+# ท่าบังคับ: ดึงบอทกลับมา Tab ปัจจุบัน (จุดที่ทำให้หน้าจอขยับ)
 def force_active_tab(driver):
     try:
         driver.switch_to.window(driver.window_handles[-1])
@@ -79,9 +73,9 @@ def fill_servicenow_ticket(driver, wait, data):
     try:
         print(f"🚀 เริ่มสร้าง Ticket: {data.get('description', 'No Subject')}")
         
-        driver.switch_to.default_content()
-        new_incident_url = "https://keristest.service-now.com/incident.do?sys_id=-1"
-        driver.get(new_incident_url)
+        # ⚡ ใส่กลับมาแล้วครับ! ดึงหน้าต่างมาแสดงผล
+        force_active_tab(driver)
+        driver.get("https://keristest.service-now.com/incident.do?sys_id=-1")
         
         print("⏳ รอหน้าฟอร์มกางตัว...")
         time.sleep(6) 
@@ -148,15 +142,14 @@ def check_sync_status(driver, wait, data):
         ticket_id = data.get("ticket_id")
         print(f"🔍 [Monitor] ค้นหาสถานะของ: {ticket_id}")
         
+        # ⚡ สั่งให้หน้าจอขยับ
         force_active_tab(driver)
-        driver.switch_to.default_content()
         driver.get("https://keristest.service-now.com/incident_list.do")
         time.sleep(5)
 
-        try:
-            wait.until(EC.frame_to_be_available_and_switch_to_it((By.ID, "gsft_main")))
-        except:
-            pass
+        driver.switch_to.default_content()
+        if driver.find_elements(By.ID, "gsft_main"):
+            driver.switch_to.frame("gsft_main")
 
         print("- เลือกโหมด 'for text'...")
         search_dropdown_element = wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(@class, 'input-group-select')]//select")))
@@ -197,7 +190,7 @@ if __name__ == "__main__":
         try:
             driver = webdriver.Chrome(options=chrome_options)
             wait = WebDriverWait(driver, 15)
-            print("🤖 บอท UAT พร้อมทำงาน! (เวอร์ชันเพิ่มระบบ Looked)")
+            print("🤖 บอท UAT พร้อมทำงาน! (เวอร์ชัน Flow สมบูรณ์)")
 
             while True:
                 # ==========================================
@@ -206,7 +199,8 @@ if __name__ == "__main__":
                 doc_id, doc_data = get_and_lock_ticket(db)
                 if doc_id:
                     if fill_servicenow_ticket(driver, wait, doc_data):
-                        mark_as_completed(db, doc_id)
+                        # ⚡ เอาฟังก์ชัน mark_as_completed ออกแล้ว ให้ค้าง status "on process" ไว้
+                        print(f"✅ คีย์ Ticket เข้าเว็บเรียบร้อย (คงสถานะ 'on process' ไว้รอเช็ค)")
 
                 # ==========================================
                 # ภารกิจที่ 2: MONITOR STATUS
@@ -216,16 +210,15 @@ if __name__ == "__main__":
                     res = check_sync_status(driver, wait, s_data)
                     
                     if res == "Resolved":
-                        # ถ้าเป็น Resolved ให้ปิดงานเป็น Done
+                        # ⚡ ถ้าเป็น Resolved ถึงจะปรับสถานะหลักเป็น Completed
                         db.collection("incidents").document(s_id).update({
                             "status": "Completed",
                             "sync_status": "Done"
                         })
-                        print(f"🎉 ตรวจพบ Resolved -> อัปเดต {s_id} เป็น Done สำเร็จ!")
+                        print(f"🎉 ตรวจพบ Resolved -> อัปเดต {s_id} เป็น Done และ Completed สำเร็จ!")
                         
                     elif res != "Error":
-                        # ถ้าเช็คแล้ว แต่สถานะยังไม่ใช่ Resolved (เช่น เป็น Open, Work in Progress หรือหาไม่เจอ)
-                        # ให้อัปเดตเป็น "looked" เพื่อไม่ให้ดึงมาเช็คซ้ำอีก
+                        # ถ้าเช็คแล้ว แต่ยังไม่ใช่ Resolved (เช่น เป็น Open หรือหาไม่เจอ)
                         db.collection("incidents").document(s_id).update({
                             "sync_status": "looked"
                         })
